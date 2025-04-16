@@ -1,3 +1,64 @@
+// Function to get previous queries from localStorage
+function getPreviousQueries() {
+    const queries = localStorage.getItem('previousQueries');
+    return queries ? JSON.parse(queries) : [];
+}
+
+// Function to save a query to localStorage
+function saveQuery(query) {
+    if (!query.trim()) return; // Don't save empty queries
+
+    let queries = getPreviousQueries();
+
+    // Remove the query if it already exists (to avoid duplicates)
+    queries = queries.filter(q => q !== query);
+
+    // Add the new query to the beginning of the array
+    queries.unshift(query);
+
+    // Limit to 10 queries
+    if (queries.length > 10) {
+        queries = queries.slice(0, 10);
+    }
+
+    localStorage.setItem('previousQueries', JSON.stringify(queries));
+}
+
+// Variable to track the currently selected item in the dropdown
+let selectedIndex = -1;
+
+// Function to display previous queries dropdown
+function displayPreviousQueries() {
+    const queries = getPreviousQueries();
+    const container = document.getElementById('previous-queries');
+
+    // Clear the container
+    container.innerHTML = '';
+    // Reset selected index
+    selectedIndex = -1;
+
+    if (queries.length === 0) {
+        container.classList.add('hidden');
+        return;
+    }
+
+    // Add each query to the dropdown
+    queries.forEach((query, index) => {
+        const item = document.createElement('div');
+        item.className = 'p-2 hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer text-left';
+        item.dataset.index = index;
+        item.textContent = query;
+        item.addEventListener('click', function() {
+            document.getElementById('search-input').value = query;
+            container.classList.add('hidden');
+        });
+        container.appendChild(item);
+    });
+
+    // Show the dropdown
+    container.classList.remove('hidden');
+}
+
 // Load available repositories when the page loads
 window.onload = function() {
     fetch('/get_repositories')
@@ -16,6 +77,119 @@ window.onload = function() {
                 option.textContent = `${repo.name} (${repo.git_version || 'Unknown'})`;  // Display shortened name to the user
                 select.appendChild(option);
             });
+
+            // Preselect the first (latest) repository if available
+            if (data.repositories.length > 0) {
+                select.value = data.repositories[0].full_name;
+            }
+
+            // Add event listener for keyboard navigation on search input
+            const searchInput = document.getElementById('search-input');
+            const previousQueries = document.getElementById('previous-queries');
+
+            searchInput.addEventListener('keydown', function(event) {
+                // Only handle keyboard navigation if the dropdown is visible
+                if (!previousQueries.classList.contains('hidden')) {
+                    const items = previousQueries.querySelectorAll('div');
+
+                    if (event.key === 'ArrowDown') {
+                        event.preventDefault();
+                        // Move selection down
+                        selectedIndex = Math.min(selectedIndex + 1, items.length - 1);
+                        updateSelectedItem(items);
+                    } else if (event.key === 'ArrowUp') {
+                        event.preventDefault();
+                        // Move selection up
+                        selectedIndex = Math.max(selectedIndex - 1, -1);
+                        updateSelectedItem(items);
+                    } else if (event.key === 'Enter' && selectedIndex >= 0) {
+                        event.preventDefault();
+                        // Select the highlighted item
+                        if (items[selectedIndex]) {
+                            searchInput.value = items[selectedIndex].textContent;
+                            previousQueries.classList.add('hidden');
+                            selectedIndex = -1;
+                        }
+                    } else if (event.key === 'Escape') {
+                        // Hide dropdown on Escape
+                        previousQueries.classList.add('hidden');
+                        selectedIndex = -1;
+                    }
+                }
+
+                // If Enter is pressed and no item is selected, perform search
+                if (event.key === 'Enter' && (previousQueries.classList.contains('hidden') || selectedIndex === -1)) {
+                    event.preventDefault(); // Prevent form submission if inside a form
+                    performSearch();
+                }
+            });
+
+            // Function to update the visual indication of the selected item
+            function updateSelectedItem(items) {
+                // Remove highlight from all items
+                items.forEach(item => {
+                    item.classList.remove('bg-gray-100', 'dark:bg-gray-700');
+                });
+
+                // Add highlight to the selected item
+                if (selectedIndex >= 0 && items[selectedIndex]) {
+                    items[selectedIndex].classList.add('bg-gray-100', 'dark:bg-gray-700');
+                    // Ensure the selected item is visible (scroll into view if needed)
+                    items[selectedIndex].scrollIntoView({ block: 'nearest' });
+                }
+            }
+
+            // Add event listener for focus on search input to show previous queries
+            searchInput.addEventListener('focus', function() {
+                displayPreviousQueries();
+            });
+
+            // Hide dropdown when clicking outside
+            document.addEventListener('click', function(event) {
+                if (!searchInput.contains(event.target) && !previousQueries.contains(event.target)) {
+                    previousQueries.classList.add('hidden');
+                }
+            });
+
+            // Add event listener for input to filter previous queries
+            searchInput.addEventListener('input', function() {
+                const value = this.value.toLowerCase();
+                const queries = getPreviousQueries();
+
+                if (!value) {
+                    displayPreviousQueries();
+                    return;
+                }
+
+                const filteredQueries = queries.filter(query => 
+                    query.toLowerCase().includes(value)
+                );
+
+                const container = document.getElementById('previous-queries');
+                container.innerHTML = '';
+
+                if (filteredQueries.length === 0) {
+                    container.classList.add('hidden');
+                    return;
+                }
+
+                // Reset selected index
+                selectedIndex = -1;
+
+                filteredQueries.forEach((query, index) => {
+                    const item = document.createElement('div');
+                    item.className = 'p-2 hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer text-left';
+                    item.dataset.index = index;
+                    item.textContent = query;
+                    item.addEventListener('click', function() {
+                        searchInput.value = query;
+                        container.classList.add('hidden');
+                    });
+                    container.appendChild(item);
+                });
+
+                container.classList.remove('hidden');
+            });
         });
 };
 
@@ -32,6 +206,12 @@ function performSearch() {
         alert('Please select a repository');
         return;
     }
+
+    // Save the query to localStorage
+    saveQuery(query);
+
+    // Hide the previous queries dropdown
+    document.getElementById('previous-queries').classList.add('hidden');
 
     // Show loading indicator
     document.getElementById('loading').style.display = 'block';

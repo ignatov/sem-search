@@ -119,3 +119,7 @@ body {
     display: none;
     margin: 1.5rem 0;
 }
+
+#previous-queries {
+    text-align: left;
+}
