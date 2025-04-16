@@ -18,13 +18,14 @@ from tests.test_embedding import TestCodeEmbedder
 from tests.test_indexing import TestVectorIndex
 from tests.test_search import TestSearchEngine
 from tests.test_parsers import TestGenericFileParser, TestUnifiedParser, TestJavaParser
+from tests.test_erlang_files import TestErlangFiles
 
 
 def run_tests():
     """Run all the tests."""
     # Create a test suite
     test_suite = unittest.TestSuite()
-    
+
     # Add all the test cases
     test_suite.addTest(unittest.makeSuite(TestCodeUnit))
     test_suite.addTest(unittest.makeSuite(TestCodeEmbedder))
@@ -33,11 +34,12 @@ def run_tests():
     test_suite.addTest(unittest.makeSuite(TestGenericFileParser))
     test_suite.addTest(unittest.makeSuite(TestUnifiedParser))
     test_suite.addTest(unittest.makeSuite(TestJavaParser))
-    
+    test_suite.addTest(unittest.makeSuite(TestErlangFiles))
+
     # Run the tests
     runner = unittest.TextTestRunner(verbosity=2)
     result = runner.run(test_suite)
-    
+
     # Return the result
     return result.wasSuccessful()
 
