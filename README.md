@@ -10,6 +10,9 @@ A tool for building and querying a semantic search index for code repositories (
 - Generates semantic embeddings using OpenAI's embedding model
 - Builds a vector index for fast similarity search
 - Provides both CLI and interactive search interfaces
+- Supports a whitelist of file extensions for the top 50 programming languages
+- Respects .gitignore patterns to skip ignored files
+- Automatically ignores .git directories
 
 ## Installation
 
@@ -50,7 +53,15 @@ If you want to parse all files without creating embeddings (useful for testing o
 python semantic_search.py --index --dry-run --repo /path/to/code/repo
 ```
 
-This mode traverses the repository, parses all files, and reports statistics about the code units found, but doesn't create embeddings or build the index.
+This mode traverses the repository, parses all files, and reports detailed statistics about the parsing process, including:
+- Total parsing time
+- Number of files found, parsed, and skipped
+- Files skipped due to extension whitelist or .gitignore patterns
+- Folders skipped due to .gitignore patterns or being .git directories
+- Parsing errors encountered and their types
+- Breakdown of code unit types found
+
+It's useful for validating your configuration and understanding what will be included in the index without actually creating embeddings or building the index.
 
 ### Search with a specific query
 
@@ -69,6 +80,12 @@ python semantic_search.py
 1. **Parsing**: 
    - For Java files: The tool extracts code units (classes and methods) using the `javalang` parser.
    - For non-Java files: The tool includes the entire file content and uses the directory structure as package information.
+   - The tool only processes files with extensions in the whitelist (covering the top 50 programming languages).
+   - Files and directories matching patterns in .gitignore are skipped.
+   - The .git directory is always ignored.
+   - Multiple encodings (utf-8, latin-1, cp1252, iso-8859-1) are tried when reading files to handle different character encodings.
+   - For Java files that can't be parsed, a fallback mechanism creates a code unit for the entire file to ensure the content is still indexed.
+   - Detailed statistics are collected and reported, including parsing time, number of files processed, files/folders skipped, and parsing errors encountered.
 
 2. **Embedding**: Each code unit is converted into a vector embedding using OpenAI's text-embedding model.
 
