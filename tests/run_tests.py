@@ -19,6 +19,7 @@ from tests.test_indexing import TestVectorIndex
 from tests.test_search import TestSearchEngine
 from tests.test_parsers import TestGenericFileParser, TestUnifiedParser, TestJavaParser
 from tests.test_erlang_files import TestErlangFiles
+from tests.test_functional import TestFunctionalWorkflow
 
 
 def run_tests():
@@ -35,6 +36,7 @@ def run_tests():
     test_suite.addTest(unittest.makeSuite(TestUnifiedParser))
     test_suite.addTest(unittest.makeSuite(TestJavaParser))
     test_suite.addTest(unittest.makeSuite(TestErlangFiles))
+    test_suite.addTest(unittest.makeSuite(TestFunctionalWorkflow))
 
     # Run the tests
     runner = unittest.TextTestRunner(verbosity=2)
