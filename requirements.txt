@@ -1,0 +1,5 @@
+numpy>=1.20.0
+faiss-cpu>=1.7.0
+javalang>=0.13.0
+openai>=1.0.0
+python-dotenv>=1.0.0
