@@ -643,7 +643,7 @@ def load_cache(index_path):
     # If all else fails, return an empty cache
     return {}
 
-def build_index(repo_path, api_key, incremental=False):
+def build_index(repo_path, api_key, incremental=False, dry_run=False):
     openai.api_key = api_key
 
     # Get the index path for this specific repository
@@ -836,6 +836,26 @@ def build_index(repo_path, api_key, incremental=False):
                 # and only including files that currently exist
 
     print(f"Total code units to index: {len(code_units)}")
+
+    # If dry_run is True, skip embedding creation and index building
+    if dry_run:
+        print("Dry run mode: Successfully parsed all files without creating embeddings.")
+        print(f"Found {len(code_units)} code units.")
+
+        # Print some statistics about the code units
+        unit_types = {}
+        for unit in code_units:
+            unit_type = unit.unit_type
+            if unit_type in unit_types:
+                unit_types[unit_type] += 1
+            else:
+                unit_types[unit_type] = 1
+
+        print("\nCode unit types:")
+        for unit_type, count in unit_types.items():
+            print(f"  {unit_type}: {count}")
+
+        return
 
     # Determine embedding dimensions
     dimensions = existing_dimensions
@@ -1133,6 +1153,7 @@ def main():
     parser = argparse.ArgumentParser(description="Semantic search for code repositories (supports Java and non-Java files)")
     parser.add_argument("--index", action="store_true", help="Build the search index")
     parser.add_argument("--incremental", action="store_true", help="Perform incremental indexing (only index changed files)")
+    parser.add_argument("--dry-run", action="store_true", help="Parse files without creating embeddings (dry run)")
     parser.add_argument("--search", help="Search query")
     parser.add_argument("--repo", type=str, help="Path to the code repository")
     parser.add_argument("--top-k", type=int, default=10, help="Number of results to return")
@@ -1154,7 +1175,7 @@ def main():
         if not args.repo:
             print("Error: Repository path required for indexing.")
             return
-        build_index(args.repo, args.api_key, incremental=args.incremental)
+        build_index(args.repo, args.api_key, incremental=args.incremental, dry_run=args.dry_run)
     elif args.search:
         search(args.search, args.top_k, args.api_key, args.index_name)
     else:

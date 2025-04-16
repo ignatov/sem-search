@@ -42,6 +42,16 @@ python semantic_search.py --index --incremental --repo /path/to/code/repo
 
 This significantly reduces indexing time for large repositories with minimal changes.
 
+### Dry run mode
+
+If you want to parse all files without creating embeddings (useful for testing or validation):
+
+```bash
+python semantic_search.py --index --dry-run --repo /path/to/code/repo
+```
+
+This mode traverses the repository, parses all files, and reports statistics about the code units found, but doesn't create embeddings or build the index.
+
 ### Search with a specific query
 
 ```bash
