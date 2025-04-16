@@ -15,14 +15,14 @@ from semsearch.models import CodeUnit
 class CodeEmbedder:
     """
     Embeds code units into vectors using OpenAI's embedding API.
-    
+
     This class handles batching, caching, and error handling for the embedding process.
     """
-    
+
     def __init__(self, model_name="text-embedding-3-large", cache=None, dimensions=1536):
         """
         Initialize the CodeEmbedder.
-        
+
         Args:
             model_name: The name of the OpenAI embedding model to use
             cache: Optional dictionary to cache embeddings by content hash
@@ -35,10 +35,10 @@ class CodeEmbedder:
     def embed_code_units(self, code_units: List[CodeUnit]) -> Dict[CodeUnit, np.ndarray]:
         """
         Embed multiple code units, using cache when available.
-        
+
         Args:
             code_units: List of CodeUnit objects to embed
-            
+
         Returns:
             Dictionary mapping CodeUnit objects to their embedding vectors
         """
@@ -68,10 +68,10 @@ class CodeEmbedder:
     def embed_query(self, query: str) -> np.ndarray:
         """
         Embed a search query.
-        
+
         Args:
             query: The search query to embed
-            
+
         Returns:
             Embedding vector for the query
         """
@@ -80,12 +80,12 @@ class CodeEmbedder:
     def _get_embeddings(self, texts: List[str]) -> List[np.ndarray]:
         """
         Get embeddings for a list of texts.
-        
+
         This method handles batching, sanitization, and error recovery.
-        
+
         Args:
             texts: List of text strings to embed
-            
+
         Returns:
             List of embedding vectors
         """
@@ -151,7 +151,19 @@ class CodeEmbedder:
                     model=self.model_name,
                     input=cleaned_batch
                 )
-                batch_embeddings = [np.array(data.embedding) for data in response.data]
+                batch_embeddings = []
+                for data in response.data:
+                    embedding = np.array(data.embedding)
+                    # Resize embedding to match expected dimensions if needed
+                    if len(embedding) != self.dimensions:
+                        if len(embedding) > self.dimensions:
+                            embedding = embedding[:self.dimensions]  # Truncate
+                        else:
+                            # Pad with zeros
+                            padded = np.zeros(self.dimensions)
+                            padded[:len(embedding)] = embedding
+                            embedding = padded
+                    batch_embeddings.append(embedding)
                 all_embeddings.extend(batch_embeddings)
             except Exception as e:
                 print(f"Error in batch {i//batch_size + 1}: {e}")
@@ -182,7 +194,19 @@ class CodeEmbedder:
                             model=self.model_name,
                             input=aggressive_batch
                         )
-                        batch_embeddings = [np.array(data.embedding) for data in response.data]
+                        batch_embeddings = []
+                        for data in response.data:
+                            embedding = np.array(data.embedding)
+                            # Resize embedding to match expected dimensions if needed
+                            if len(embedding) != self.dimensions:
+                                if len(embedding) > self.dimensions:
+                                    embedding = embedding[:self.dimensions]  # Truncate
+                                else:
+                                    # Pad with zeros
+                                    padded = np.zeros(self.dimensions)
+                                    padded[:len(embedding)] = embedding
+                                    embedding = padded
+                            batch_embeddings.append(embedding)
                         all_embeddings.extend(batch_embeddings)
                         print(f"Successfully processed batch with aggressive sanitization")
                         continue  # Skip the individual processing
@@ -242,7 +266,17 @@ class CodeEmbedder:
                                     model=self.model_name,
                                     input=[text]
                                 )
-                                all_embeddings.append(np.array(response.data[0].embedding))
+                                embedding = np.array(response.data[0].embedding)
+                                # Resize embedding to match expected dimensions if needed
+                                if len(embedding) != self.dimensions:
+                                    if len(embedding) > self.dimensions:
+                                        embedding = embedding[:self.dimensions]  # Truncate
+                                    else:
+                                        # Pad with zeros
+                                        padded = np.zeros(self.dimensions)
+                                        padded[:len(embedding)] = embedding
+                                        embedding = padded
+                                all_embeddings.append(embedding)
                                 print(f"  Processed item {i+j+1}/{len(texts)}")
                             except Exception as api_error:
                                 if "$.input" in str(api_error):
@@ -262,7 +296,17 @@ class CodeEmbedder:
                                             model=self.model_name,
                                             input=[extreme_text]
                                         )
-                                        all_embeddings.append(np.array(response.data[0].embedding))
+                                        embedding = np.array(response.data[0].embedding)
+                                        # Resize embedding to match expected dimensions if needed
+                                        if len(embedding) != self.dimensions:
+                                            if len(embedding) > self.dimensions:
+                                                embedding = embedding[:self.dimensions]  # Truncate
+                                            else:
+                                                # Pad with zeros
+                                                padded = np.zeros(self.dimensions)
+                                                padded[:len(embedding)] = embedding
+                                                embedding = padded
+                                        all_embeddings.append(embedding)
                                         print(f"  Successfully processed item {i+j+1} after extreme sanitization")
                                     except Exception as extreme_error:
                                         print(f"  Still failed after extreme sanitization: {extreme_error}")
@@ -283,11 +327,11 @@ class CodeEmbedder:
     def _sanitize_text(self, text, aggressive=False):
         """
         Sanitize text to ensure it's valid for the OpenAI API.
-        
+
         Args:
             text: The text to sanitize
             aggressive: Whether to apply more aggressive sanitization
-            
+
         Returns:
             Sanitized text
         """

@@ -1,11 +1,23 @@
 """
 Tests for parsing, indexing, and searching Erlang files.
+
+This module includes tests that use real Erlang files as test data.
+Some tests use mocked embeddings to avoid making actual API calls,
+while others can use real embeddings if an OpenAI API key is provided.
+
+To run tests with real embeddings:
+1. Copy the .env.sample file to .env
+2. Add your OpenAI API key to the .env file
+3. Run the tests with: python -m unittest tests.test_erlang_files
+
+If no API key is provided, the tests that require real embeddings will be skipped.
 """
 
 import unittest
 from unittest.mock import patch, MagicMock
 import os
 import numpy as np
+from dotenv import load_dotenv
 from semsearch.models import CodeUnit
 from semsearch.parsers import GenericFileParser
 from semsearch.indexing import VectorIndex
@@ -160,6 +172,90 @@ class TestErlangFiles(unittest.TestCase):
         # The BIF file should be more relevant for a BIF query
         bif_file_in_results = any(unit.name == "ErlangBifParser.java" for unit, _ in results)
         self.assertTrue(bif_file_in_results, "BIF file not found in search results")
+
+
+    def test_real_embeddings_with_api_key(self):
+        """Test using real embeddings with an API key from .env file."""
+        # Load API key from .env file
+        load_dotenv()
+        api_key = os.environ.get("OPENAI_API_KEY")
+
+        # Skip test if no API key is found
+        if not api_key:
+            self.skipTest("No OpenAI API key found in .env file or environment variables. Skipping test.")
+
+        # Set the API key for OpenAI
+        import openai
+        openai.api_key = api_key
+
+        # Parse both files
+        doc_file_path = os.path.join(self.documentation_dir, 'ErlangDocumentationProviderTest.java')
+        bif_file_path = os.path.join(self.bif_dir, 'ErlangBifParser.java')
+
+        doc_units = self.parser.parse_file(doc_file_path, self.test_data_dir)
+        bif_units = self.parser.parse_file(bif_file_path, self.test_data_dir)
+
+        all_units = doc_units + bif_units
+
+        # Get real embeddings for the code units (not mocked)
+        # The dimensions depend on the model being used, so we'll get the dimensions from the first embedding
+        real_embedder = CodeEmbedder()  # Use default dimensions
+        embeddings = real_embedder.embed_code_units(all_units)
+
+        # Check that we got embeddings for all units
+        self.assertEqual(len(embeddings), len(all_units), 
+                         "Number of embeddings should match number of code units")
+
+        # Get the actual dimensions from the first embedding
+        first_embedding = next(iter(embeddings.values()))
+        actual_dimensions = first_embedding.shape[0]
+        print(f"Actual embedding dimensions: {actual_dimensions}")
+
+        # Build the index with the correct dimensions
+        real_index = VectorIndex(dimensions=actual_dimensions)
+        real_index.build_index(embeddings)
+
+        # Search for documentation-related content
+        doc_query = "Erlang documentation provider for IDE"
+        doc_query_embedding = real_embedder.embed_query(doc_query)
+
+        doc_results = real_index.search(doc_query_embedding, 2)
+
+        # Check that we got results
+        self.assertEqual(len(doc_results), 2, "Expected 2 search results for documentation query")
+
+        # Search for BIF-related content
+        bif_query = "Erlang built-in functions parser implementation"
+        bif_query_embedding = real_embedder.embed_query(bif_query)
+
+        bif_results = real_index.search(bif_query_embedding, 2)
+
+        # Check that we got results
+        self.assertEqual(len(bif_results), 2, "Expected 2 search results for BIF query")
+
+        # Print the results for manual verification
+        print("\nDocumentation query results:")
+        for i, (unit, score) in enumerate(doc_results):
+            print(f"{i+1}. {unit.name} (score: {score:.4f})")
+
+        print("\nBIF query results:")
+        for i, (unit, score) in enumerate(bif_results):
+            print(f"{i+1}. {unit.name} (score: {score:.4f})")
+
+        # Verify that the expected ranking of results is correct
+        # For the documentation query, the documentation file should be ranked higher
+        doc_file_score = next((score for unit, score in doc_results if unit.name == "ErlangDocumentationProviderTest.java"), 0)
+        bif_file_score_in_doc_results = next((score for unit, score in doc_results if unit.name == "ErlangBifParser.java"), 0)
+
+        self.assertGreater(doc_file_score, bif_file_score_in_doc_results, 
+                          "Documentation file should be ranked higher for documentation query")
+
+        # For the BIF query, the BIF file should be ranked higher
+        bif_file_score = next((score for unit, score in bif_results if unit.name == "ErlangBifParser.java"), 0)
+        doc_file_score_in_bif_results = next((score for unit, score in bif_results if unit.name == "ErlangDocumentationProviderTest.java"), 0)
+
+        self.assertGreater(bif_file_score, doc_file_score_in_bif_results, 
+                          "BIF file should be ranked higher for BIF query")
 
 
 if __name__ == "__main__":
