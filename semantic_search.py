@@ -40,26 +40,76 @@ class CodeUnit:
                 self.class_name == other.class_name)
 
 class JavaParser:
+    def parse_file(self, file_path: str, repo_path: str) -> List[CodeUnit]:
+        """Parse a single Java file and extract code units."""
+        # This is now just a wrapper around UnifiedParser for backward compatibility
+        unified_parser = UnifiedParser()
+        return unified_parser.parse_java_file(file_path, repo_path)
+
+class GenericFileParser:
+    def parse_file(self, file_path: str, repo_path: str) -> List[CodeUnit]:
+        """Parse a single non-Java file and extract code units."""
+        code_units = []
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+
+            relative_path = os.path.relpath(file_path, repo_path)
+
+            # Use directory structure as package name
+            dir_path = os.path.dirname(relative_path)
+            package = dir_path.replace(os.path.sep, '.') if dir_path else None
+
+            # Create a code unit for the entire file
+            code_units.append(CodeUnit(
+                path=relative_path,
+                content=content,
+                unit_type="file",
+                name=os.path.basename(file_path),
+                package=package
+            ))
+        except Exception as e:
+            print(f"Error reading non-Java file {file_path}: {e}")
+
+        return code_units
+
+class UnifiedParser:
+    def __init__(self):
+        self.generic_parser = GenericFileParser()
+
     def parse_repository(self, repo_path: str) -> List[CodeUnit]:
+        """Walk through the repository once and parse all files."""
         code_units = []
 
         for root, _, files in os.walk(repo_path):
             for file in files:
-                if file.endswith('.java'):
-                    file_path = os.path.join(root, file)
-                    try:
-                        with open(file_path, 'r', encoding='utf-8') as f:
-                            content = f.read()
+                file_path = os.path.join(root, file)
 
-                        tree = javalang.parse.parse(content)
-                        relative_path = os.path.relpath(file_path, repo_path)
-                        code_units.extend(self._extract_code_units(tree, relative_path, content))
-                    except Exception as e:
-                        print(f"Error parsing {file_path}: {e}")
+                # Choose the appropriate parser based on file extension
+                if file.endswith('.java'):
+                    code_units.extend(self.parse_java_file(file_path, repo_path))
+                else:
+                    # Include non-Java files in the index
+                    code_units.extend(self.generic_parser.parse_file(file_path, repo_path))
 
         return code_units
 
-    def _extract_code_units(self, tree, file_path, content):
+    def parse_java_file(self, file_path: str, repo_path: str) -> List[CodeUnit]:
+        """Parse a single Java file and extract code units."""
+        code_units = []
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+
+            tree = javalang.parse.parse(content)
+            relative_path = os.path.relpath(file_path, repo_path)
+            code_units.extend(self._extract_java_code_units(tree, relative_path, content))
+        except Exception as e:
+            print(f"Error parsing Java file {file_path}: {e}")
+
+        return code_units
+
+    def _extract_java_code_units(self, tree, file_path, content):
         code_units = []
         package_name = None
 
@@ -155,29 +205,185 @@ class CodeEmbedder:
         batch_size = 100  # Adjust based on your average text length
         all_embeddings = []
 
+        # Ensure all texts are valid strings
+        valid_texts = []
+        for text in texts:
+            if text is None:
+                valid_texts.append("")  # Replace None with empty string
+            elif isinstance(text, str):
+                valid_texts.append(text)
+            else:
+                # Convert non-string values to strings
+                try:
+                    valid_texts.append(str(text))
+                except:
+                    valid_texts.append("")
+
+        texts = valid_texts
+
         for i in range(0, len(texts), batch_size):
             batch_texts = texts[i:i+batch_size]
             print(f"Processing batch {i//batch_size + 1}/{(len(texts) + batch_size - 1)//batch_size}...")
             try:
+                # Ensure each text in the batch is a valid string
+                cleaned_batch = []
+                for idx, text in enumerate(batch_texts):
+                    # Remove any characters that might cause issues with the API
+                    if text is not None:
+                        # Ensure text is not too long (OpenAI has token limits)
+                        if len(text) > 25000:  # Approximate limit
+                            text = text[:25000]
+
+                        # Check for potentially problematic items (e.g., item 476)
+                        item_number = i + idx + 1
+                        if item_number == 476:
+                            print(f"  Pre-emptively applying aggressive sanitization to known problematic item {item_number}")
+                            text = self._sanitize_text(text, aggressive=True)
+
+                            # Log details for debugging
+                            print(f"  After aggressive sanitization:")
+                            print(f"  Text length: {len(text)}")
+                            if len(text) > 0:
+                                print(f"  First 50 chars: {repr(text[:50])}")
+                                print(f"  Last 50 chars: {repr(text[-50:] if len(text) >= 50 else text)}")
+                        else:
+                            # Standard sanitization for other items
+                            text = self._sanitize_text(text)
+
+                        # Skip empty texts
+                        if not text.strip():
+                            print(f"  Replacing empty item {item_number} with placeholder text")
+                            text = "placeholder_text_for_embedding"
+
+                        cleaned_batch.append(text)
+                    else:
+                        cleaned_batch.append("")  # Empty string for None values
+
                 response = openai.embeddings.create(
                     model=self.model_name,
-                    input=batch_texts
+                    input=cleaned_batch
                 )
                 batch_embeddings = [np.array(data.embedding) for data in response.data]
                 all_embeddings.extend(batch_embeddings)
             except Exception as e:
                 print(f"Error in batch {i//batch_size + 1}: {e}")
-                # If a batch is still too large, process one by one
-                if "max_tokens" in str(e).lower():
-                    print("Batch too large, processing items individually...")
+
+                # If it's an input validation error, try with more aggressive sanitization first
+                if "$.input" in str(e):
+                    print("Invalid input in batch, attempting with aggressive sanitization...")
+                    try:
+                        # Apply aggressive sanitization to all items in the batch
+                        aggressive_batch = []
+                        for idx, text in enumerate(batch_texts):
+                            if text is not None:
+                                # Truncate and sanitize aggressively
+                                if len(text) > 25000:
+                                    text = text[:25000]
+                                text = self._sanitize_text(text, aggressive=True)
+
+                                # Ensure text is not empty
+                                if not text.strip():
+                                    text = "placeholder_text_for_embedding"
+
+                                aggressive_batch.append(text)
+                            else:
+                                aggressive_batch.append("")
+
+                        # Try the API call with aggressively sanitized batch
+                        response = openai.embeddings.create(
+                            model=self.model_name,
+                            input=aggressive_batch
+                        )
+                        batch_embeddings = [np.array(data.embedding) for data in response.data]
+                        all_embeddings.extend(batch_embeddings)
+                        print(f"Successfully processed batch with aggressive sanitization")
+                        continue  # Skip the individual processing
+                    except Exception as batch_retry_error:
+                        print(f"Batch still failed after aggressive sanitization: {batch_retry_error}")
+                        # Fall back to individual processing
+
+                # If a batch is still too large or has invalid input, process one by one
+                if "max_tokens" in str(e).lower() or "$.input" in str(e):
+                    print("Batch too large or invalid input, processing items individually...")
                     for j, text in enumerate(batch_texts):
                         try:
-                            response = openai.embeddings.create(
-                                model=self.model_name,
-                                input=[text]
-                            )
-                            all_embeddings.append(np.array(response.data[0].embedding))
-                            print(f"  Processed item {i+j+1}/{len(texts)}")
+                            if text is None or not isinstance(text, str):
+                                text = ""
+                            # Truncate very long texts
+                            if len(text) > 25000:
+                                text = text[:25000]
+                            # Log problematic text details for debugging
+                            if i+j+1 == 476 or "$.input" in str(e):
+                                print(f"  Debugging item {i+j+1} before sanitization:")
+                                print(f"  Text type: {type(text)}")
+                                print(f"  Text length: {len(text) if isinstance(text, str) else 'N/A'}")
+                                if isinstance(text, str) and len(text) > 0:
+                                    print(f"  First 50 chars: {repr(text[:50])}")
+                                    print(f"  Last 50 chars: {repr(text[-50:] if len(text) >= 50 else text)}")
+
+                            # Apply more aggressive sanitization for individual processing
+                            original_text = text
+                            text = self._sanitize_text(text, aggressive=True)
+
+                            # Log after sanitization
+                            if i+j+1 == 476 or "$.input" in str(e):
+                                print(f"  After sanitization:")
+                                print(f"  Text length: {len(text)}")
+                                if len(text) > 0:
+                                    print(f"  First 50 chars: {repr(text[:50])}")
+                                    print(f"  Last 50 chars: {repr(text[-50:] if len(text) >= 50 else text)}")
+
+                                # Check for specific problematic patterns
+                                import re
+                                surrogate_pairs = re.findall(r'[\uD800-\uDFFF]', original_text)
+                                if surrogate_pairs:
+                                    print(f"  Found {len(surrogate_pairs)} surrogate pairs")
+
+                                control_chars = re.findall(r'[\x00-\x1F\x7F-\x9F]', original_text)
+                                if control_chars:
+                                    print(f"  Found {len(control_chars)} control characters")
+
+                            # Skip empty texts
+                            if not text.strip():
+                                print(f"  Skipping empty item {i+j+1}")
+                                all_embeddings.append(np.zeros(self.dimensions if hasattr(self, 'dimensions') else 1536))
+                                continue
+
+                            try:
+                                # First attempt with current sanitization
+                                response = openai.embeddings.create(
+                                    model=self.model_name,
+                                    input=[text]
+                                )
+                                all_embeddings.append(np.array(response.data[0].embedding))
+                                print(f"  Processed item {i+j+1}/{len(texts)}")
+                            except Exception as api_error:
+                                if "$.input" in str(api_error):
+                                    print(f"  API error with item {i+j+1}, attempting extreme sanitization: {api_error}")
+
+                                    # Extreme sanitization - only keep basic ASCII letters, numbers, and spaces
+                                    extreme_text = ''.join(ch if ch.isalnum() or ch.isspace() else ' ' for ch in text)
+                                    extreme_text = re.sub(r'\s+', ' ', extreme_text).strip()
+
+                                    if not extreme_text:
+                                        extreme_text = "placeholder_text_for_embedding"
+
+                                    print(f"  After extreme sanitization: {repr(extreme_text[:50])}...")
+
+                                    try:
+                                        response = openai.embeddings.create(
+                                            model=self.model_name,
+                                            input=[extreme_text]
+                                        )
+                                        all_embeddings.append(np.array(response.data[0].embedding))
+                                        print(f"  Successfully processed item {i+j+1} after extreme sanitization")
+                                    except Exception as extreme_error:
+                                        print(f"  Still failed after extreme sanitization: {extreme_error}")
+                                        # Add a zero vector as placeholder
+                                        all_embeddings.append(np.zeros(self.dimensions if hasattr(self, 'dimensions') else 1536))
+                                else:
+                                    # Re-raise if it's not an input validation error
+                                    raise
                         except Exception as e2:
                             print(f"  Skipping item {i+j+1} due to error: {e2}")
                             # Add a zero vector as placeholder to maintain alignment
@@ -186,6 +392,40 @@ class CodeEmbedder:
                     raise
 
         return all_embeddings
+
+    def _sanitize_text(self, text, aggressive=False):
+        """Sanitize text to ensure it's valid for the OpenAI API."""
+        if not text:
+            return ""
+
+        # Basic sanitization
+        # Replace null bytes and other control characters
+        text = ''.join(ch if ord(ch) >= 32 or ch in '\n\r\t' else ' ' for ch in text)
+
+        # Check for and remove invalid surrogate pairs and other problematic Unicode
+        import re
+        # Remove invalid UTF-8 sequences and unpaired surrogates
+        text = re.sub(r'[\uD800-\uDFFF]', ' ', text)
+
+        # Remove zero-width characters and other invisible formatting
+        text = re.sub(r'[\u200B-\u200F\u202A-\u202E\uFEFF]', '', text)
+
+        if aggressive:
+            # More aggressive sanitization for problematic texts
+            # Replace any non-ASCII characters
+            text = ''.join(ch if ord(ch) < 128 else ' ' for ch in text)
+
+            # Limit consecutive whitespace
+            text = re.sub(r'\s+', ' ', text)
+
+            # Remove any characters that might cause JSON parsing issues
+            text = re.sub(r'[\\"\'\x00-\x1F\x7F-\x9F]', ' ', text)
+
+            # Ensure the text is not empty after sanitization
+            if not text.strip():
+                return "empty_content"
+
+        return text
 
 class VectorIndex:
     def __init__(self, dimensions=1536):
@@ -482,22 +722,21 @@ def build_index(repo_path, api_key, incremental=False):
     # Collect current file metadata for change detection
     current_file_metadata = {}
 
-    print(f"Parsing Java files in {repo_path}...")
-    parser = JavaParser()
+    print(f"Parsing files in {repo_path}...")
+    unified_parser = UnifiedParser()
 
     # If incremental, we'll collect code units differently
     if incremental and existing_index_exists and index is not None:
-        # Get all Java files in the repository
-        all_java_files = []
+        # Get all files in the repository
+        all_files = []
         for root, _, files in os.walk(repo_path):
             for file in files:
-                if file.endswith('.java'):
-                    file_path = os.path.join(root, file)
-                    all_java_files.append(file_path)
+                file_path = os.path.join(root, file)
+                all_files.append(file_path)
 
         # Determine which files are new or modified
         changed_files = []
-        for file_path in all_java_files:
+        for file_path in all_files:
             relative_path = os.path.relpath(file_path, repo_path)
 
             # Get file stats
@@ -524,20 +763,24 @@ def build_index(repo_path, api_key, incremental=False):
             if not os.path.exists(full_path):
                 deleted_files.append(relative_path)
 
-        print(f"Found {len(all_java_files)} Java files: {len(changed_files)} new/modified, {len(deleted_files)} deleted")
+        print(f"Found {len(all_files)} files: {len(changed_files)} new/modified, {len(deleted_files)} deleted")
 
         # Parse only the changed files
         new_code_units = []
-        for file_path in changed_files:
-            try:
-                with open(file_path, 'r', encoding='utf-8') as f:
-                    content = f.read()
 
-                tree = javalang.parse.parse(content)
-                relative_path = os.path.relpath(file_path, repo_path)
-                new_code_units.extend(parser._extract_code_units(tree, relative_path, content))
-            except Exception as e:
-                print(f"Error parsing {file_path}: {e}")
+        # Process all changed files in a single loop
+        for file_path in changed_files:
+            relative_path = os.path.relpath(file_path, repo_path)
+
+            # Get directory structure as package name
+            dir_path = os.path.dirname(relative_path)
+            package_name = dir_path.replace(os.path.sep, '.') if dir_path else None
+
+            # Choose the appropriate parser based on file extension
+            if file_path.endswith('.java'):
+                new_code_units.extend(unified_parser.parse_java_file(file_path, repo_path))
+            else:
+                new_code_units.extend(unified_parser.generic_parser.parse_file(file_path, repo_path))
 
         print(f"Extracted {len(new_code_units)} code units from changed files")
 
@@ -559,26 +802,25 @@ def build_index(repo_path, api_key, incremental=False):
         # Combine existing and new code units
         code_units = existing_code_units + new_code_units
     else:
-        # For full indexing, parse all files
-        code_units = parser.parse_repository(repo_path)
+        # For full indexing, parse all files with the unified parser
+        code_units = unified_parser.parse_repository(repo_path)
 
         # Collect metadata for all files
         for root, _, files in os.walk(repo_path):
             for file in files:
-                if file.endswith('.java'):
-                    file_path = os.path.join(root, file)
-                    relative_path = os.path.relpath(file_path, repo_path)
+                file_path = os.path.join(root, file)
+                relative_path = os.path.relpath(file_path, repo_path)
 
-                    # Get file stats
-                    stat = os.stat(file_path)
-                    mtime = stat.st_mtime
-                    size = stat.st_size
+                # Get file stats
+                stat = os.stat(file_path)
+                mtime = stat.st_mtime
+                size = stat.st_size
 
-                    # Store current metadata
-                    current_file_metadata[relative_path] = {
-                        'mtime': mtime,
-                        'size': size
-                    }
+                # Store current metadata
+                current_file_metadata[relative_path] = {
+                    'mtime': mtime,
+                    'size': size
+                }
 
         # Check for deleted files (do this for full indexing too)
         if existing_file_metadata:
@@ -888,11 +1130,11 @@ def main():
     # Load API key from .env file
     load_dotenv()
 
-    parser = argparse.ArgumentParser(description="Semantic search for Java code repositories")
+    parser = argparse.ArgumentParser(description="Semantic search for code repositories (supports Java and non-Java files)")
     parser.add_argument("--index", action="store_true", help="Build the search index")
     parser.add_argument("--incremental", action="store_true", help="Perform incremental indexing (only index changed files)")
     parser.add_argument("--search", help="Search query")
-    parser.add_argument("--repo", type=str, help="Path to the Java repository")
+    parser.add_argument("--repo", type=str, help="Path to the code repository")
     parser.add_argument("--top-k", type=int, default=10, help="Number of results to return")
     parser.add_argument("--api-key", type=str, help="OpenAI API key")
     parser.add_argument("--list-indexes", action="store_true", help="List available indexes")

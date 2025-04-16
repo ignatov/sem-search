@@ -1,10 +1,12 @@
-# Semantic Java Code Search
+# Semantic Code Search
 
-A tool for building and querying a semantic search index for Java code repositories.
+A tool for building and querying a semantic search index for code repositories (supports Java and non-Java files).
 
 ## Features
 
 - Parses Java source code to extract classes and methods
+- Includes non-Java files with their text content
+- Includes package/directory information for all files
 - Generates semantic embeddings using OpenAI's embedding model
 - Builds a vector index for fast similarity search
 - Provides both CLI and interactive search interfaces
@@ -20,14 +22,14 @@ pip install -r requirements.txt
 ### Build the index
 
 ```bash
-python semantic_search.py --index --repo /path/to/java/repo --api-key YOUR_OPENAI_API_KEY
+python semantic_search.py --index --repo /path/to/code/repo --api-key YOUR_OPENAI_API_KEY
 ```
 
 Or use the environment variable for the API key:
 
 ```bash
 export OPENAI_API_KEY=YOUR_OPENAI_API_KEY
-python semantic_search.py --index --repo /path/to/java/repo
+python semantic_search.py --index --repo /path/to/code/repo
 ```
 
 ### Incremental indexing
@@ -35,7 +37,7 @@ python semantic_search.py --index --repo /path/to/java/repo
 For repositories that change frequently, you can use incremental indexing to only process files that have changed since the last indexing:
 
 ```bash
-python semantic_search.py --index --incremental --repo /path/to/java/repo
+python semantic_search.py --index --incremental --repo /path/to/code/repo
 ```
 
 This significantly reduces indexing time for large repositories with minimal changes.
@@ -54,7 +56,9 @@ python semantic_search.py
 
 ## How it works
 
-1. **Parsing**: The tool walks through the Java repository and extracts code units (classes and methods) using the `javalang` parser.
+1. **Parsing**: 
+   - For Java files: The tool extracts code units (classes and methods) using the `javalang` parser.
+   - For non-Java files: The tool includes the entire file content and uses the directory structure as package information.
 
 2. **Embedding**: Each code unit is converted into a vector embedding using OpenAI's text-embedding model.
 
