@@ -1,7 +1,7 @@
 import os
 import datetime
 from flask import Flask, render_template, request, jsonify
-from semantic_search import list_available_indexes, search, display_results, CodeUnit
+from semsearch import list_available_indexes, search, display_results, CodeUnit
 from dotenv import load_dotenv
 
 # Load environment variables
