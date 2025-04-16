@@ -115,6 +115,95 @@ body {
     line-height: 1.5;
 }
 
+/* Ensure code element inherits styles from pre */
+.result-content code {
+    font-family: inherit;
+    background: transparent;
+    padding: 0;
+    border-radius: 0;
+    white-space: inherit;
+    display: block;
+}
+
+/* Override some highlight.js styles to better match our theme */
+.hljs {
+    background: transparent !important;
+    padding: 0 !important;
+}
+
+/* Custom syntax highlighting colors for light mode */
+.hljs-keyword,
+.hljs-selector-tag,
+.hljs-built_in,
+.hljs-name,
+.hljs-tag {
+    color: #0550ae;
+}
+
+.hljs-string,
+.hljs-title,
+.hljs-section,
+.hljs-attribute,
+.hljs-literal,
+.hljs-template-tag,
+.hljs-template-variable,
+.hljs-type,
+.hljs-addition {
+    color: #0a7a00;
+}
+
+.hljs-comment,
+.hljs-quote,
+.hljs-deletion,
+.hljs-meta {
+    color: #6e7781;
+}
+
+.hljs-keyword,
+.hljs-selector-tag,
+.hljs-literal,
+.hljs-doctag,
+.hljs-title,
+.hljs-section,
+.hljs-type,
+.hljs-selector-id,
+.hljs-selector-class,
+.hljs-selector-attr,
+.hljs-selector-pseudo,
+.hljs-number {
+    font-weight: 600;
+}
+
+/* Custom syntax highlighting colors for dark mode */
+@media (prefers-color-scheme: dark) {
+    .hljs-keyword,
+    .hljs-selector-tag,
+    .hljs-built_in,
+    .hljs-name,
+    .hljs-tag {
+        color: #79c0ff;
+    }
+
+    .hljs-string,
+    .hljs-title,
+    .hljs-section,
+    .hljs-attribute,
+    .hljs-literal,
+    .hljs-template-tag,
+    .hljs-template-variable,
+    .hljs-type,
+    .hljs-addition {
+        color: #7ee787;
+    }
+
+    .hljs-comment,
+    .hljs-quote,
+    .hljs-deletion,
+    .hljs-meta {
+        color: #8b949e;
+    }
+}
+
 .loading {
     display: none;
     margin: 1.5rem 0;

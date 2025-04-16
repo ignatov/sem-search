@@ -300,7 +300,70 @@ function performSearch() {
             // Create content section with syntax highlighting
             const content = document.createElement('pre');
             content.className = 'result-content';
-            content.textContent = result.content;
+
+            // Create code element for highlight.js
+            const codeElement = document.createElement('code');
+
+            // Determine language from file extension
+            let language = '';
+            if (result.path) {
+                const fileExtension = result.path.split('.').pop().toLowerCase();
+                // Map file extensions to highlight.js language classes
+                const extensionMap = {
+                    'java': 'java',
+                    'py': 'python',
+                    'js': 'javascript',
+                    'ts': 'typescript',
+                    'kt': 'kotlin',
+                    'go': 'go',
+                    'rs': 'rust',
+                    'scala': 'scala',
+                    'swift': 'swift',
+                    'cs': 'csharp',
+                    'cpp': 'cpp',
+                    'c': 'c',
+                    'h': 'c',
+                    'hpp': 'cpp',
+                    'erl': 'erlang',
+                    'hrl': 'erlang',
+                    'html': 'html',
+                    'css': 'css',
+                    'xml': 'xml',
+                    'json': 'json',
+                    'md': 'markdown',
+                    'rb': 'ruby',
+                    'php': 'php',
+                    'sh': 'bash',
+                    'bash': 'bash',
+                    'yml': 'yaml',
+                    'yaml': 'yaml',
+                    'sql': 'sql',
+                    'dart': 'dart',
+                    'ex': 'elixir',
+                    'exs': 'elixir',
+                    'hs': 'haskell',
+                    'lua': 'lua',
+                    'pl': 'perl',
+                    'r': 'r'
+                };
+                language = extensionMap[fileExtension] || '';
+            }
+
+            // Add the language class if we could determine it
+            if (language) {
+                codeElement.className = language;
+            }
+
+            codeElement.textContent = result.content;
+            content.appendChild(codeElement);
+
+            // Apply highlight.js
+            if (language) {
+                hljs.highlightElement(codeElement);
+            } else {
+                // Try autodetection if we couldn't determine the language
+                hljs.highlightElement(codeElement);
+            }
 
             // Assemble the result item
             resultItem.appendChild(header);

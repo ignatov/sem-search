@@ -15,9 +15,35 @@
     <!-- Inter font -->
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
 
+    <!-- Highlight.js for syntax highlighting -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.7.0/styles/default.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.7.0/styles/github-dark.min.css" media="(prefers-color-scheme: dark)">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.7.0/highlight.min.js"></script>
+    <!-- Additional languages -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.7.0/languages/java.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.7.0/languages/python.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.7.0/languages/javascript.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.7.0/languages/typescript.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.7.0/languages/kotlin.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.7.0/languages/go.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.7.0/languages/rust.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.7.0/languages/scala.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.7.0/languages/swift.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.7.0/languages/csharp.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.7.0/languages/cpp.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.7.0/languages/erlang.min.js"></script>
+
     <style>
         body {
             font-family: 'Inter', sans-serif;
+        }
+
+        /* Override highlight.js styles for dark mode */
+        @media (prefers-color-scheme: dark) {
+            .hljs {
+                background: hsl(var(--muted));
+                color: hsl(var(--foreground));
+            }
         }
     </style>
 </head>
@@ -74,5 +100,21 @@
 
     <!-- Custom script -->
     <script src="{{ url_for('static', filename='js/script.js') }}"></script>
+
+    <!-- Initialize highlight.js -->
+    <script>
+        // Configure highlight.js
+        hljs.configure({
+            // Disable auto-detection if we've specified a language
+            ignoreUnescapedHTML: true,
+            languages: [
+                'java', 'python', 'javascript', 'typescript', 'kotlin', 
+                'go', 'rust', 'scala', 'swift', 'csharp', 'cpp', 'c',
+                'erlang', 'html', 'css', 'xml', 'json', 'markdown',
+                'ruby', 'php', 'bash', 'yaml', 'sql', 'dart', 'elixir',
+                'haskell', 'lua', 'perl', 'r'
+            ]
+        });
+    </script>
 </body>
 </html>
