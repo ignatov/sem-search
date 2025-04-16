@@ -70,6 +70,8 @@ python semantic_search.py
   - For modified working copies, the structure is `.semsearch/reponame.<repo_path_hash>/<git_commit_hash>-latest`
   - For non-Git repositories, the old structure `.semsearch/reponame.<repo_path_hash>` is used
 - When building an index for a new commit, the tool will attempt to reuse data from previous commits to speed up indexing
-- Embeddings are cached to avoid redundant API calls
+- Embeddings are cached in a shared repository-wide cache to avoid redundant API calls and reduce storage space
+- Each revision's index references the shared cache instead of duplicating embeddings
 - File metadata (modification times and sizes) is tracked to support incremental indexing
+- Deleted files are automatically detected and removed from the index during both incremental and full indexing
 - The tool requires an OpenAI API key for generating embeddings

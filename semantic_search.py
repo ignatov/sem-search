@@ -298,8 +298,8 @@ def get_git_info(repo_path):
         print(f"Error getting git info: {e}")
         return None, False
 
-def get_index_path(repo_path):
-    """Generate a path for the index based on the repository path and git commit"""
+def get_repo_base_dir(repo_path):
+    """Get the base directory for a repository"""
     # Create a safe directory name from the repo path
     repo_name = os.path.basename(os.path.normpath(repo_path))
     # Replace any non-alphanumeric characters with underscores
@@ -309,11 +309,21 @@ def get_index_path(repo_path):
     import hashlib
     path_hash = hashlib.md5(repo_path.encode('utf-8')).hexdigest()[:8]
 
+    # Return the base directory
+    return os.path.join(".semsearch", f"{safe_name}.{path_hash}")
+
+def get_shared_cache_path(repo_path):
+    """Get the path to the shared cache for a repository"""
+    base_dir = get_repo_base_dir(repo_path)
+    return os.path.join(base_dir, "shared_cache.pkl")
+
+def get_index_path(repo_path):
+    """Generate a path for the index based on the repository path and git commit"""
+    # Get the base directory
+    base_dir = get_repo_base_dir(repo_path)
+
     # Get git commit info
     commit_hash, has_changes = get_git_info(repo_path)
-
-    # Create the base directory
-    base_dir = os.path.join(".semsearch", f"{safe_name}.{path_hash}")
 
     # If we have a git commit hash, use it for the subdirectory
     if commit_hash:
@@ -330,11 +340,7 @@ def get_index_path(repo_path):
 def find_previous_index(repo_path):
     """Find a previous index for the same repository that we can reuse"""
     # Get the base directory for this repository
-    repo_name = os.path.basename(os.path.normpath(repo_path))
-    safe_name = ''.join(c if c.isalnum() else '_' for c in repo_name)
-    import hashlib
-    path_hash = hashlib.md5(repo_path.encode('utf-8')).hexdigest()[:8]
-    base_dir = os.path.join(".semsearch", f"{safe_name}.{path_hash}")
+    base_dir = get_repo_base_dir(repo_path)
 
     # If the base directory doesn't exist, there's no previous index
     if not os.path.exists(base_dir):
@@ -358,6 +364,45 @@ def find_previous_index(repo_path):
 
     return None
 
+def load_cache(index_path):
+    """Load the cache for an index, using shared cache if available"""
+    # Check if there's a reference to a shared cache
+    cache_ref_path = os.path.join(index_path, "cache_ref.txt")
+    if os.path.exists(cache_ref_path):
+        try:
+            # Parse the reference file to get the shared cache path
+            with open(cache_ref_path, "r") as f:
+                for line in f:
+                    if line.startswith("Using shared cache at:"):
+                        shared_cache_path = line.split(":", 1)[1].strip()
+                        break
+                else:
+                    shared_cache_path = None
+
+            # If we found a shared cache path, try to load it
+            if shared_cache_path and os.path.exists(shared_cache_path):
+                with open(shared_cache_path, "rb") as f:
+                    cache = pickle.load(f)
+                print(f"Loaded shared embedding cache with {len(cache)} entries")
+                return cache
+        except Exception as e:
+            print(f"Error loading shared cache: {e}")
+            # Fall back to local cache
+
+    # Try to load the local cache
+    cache_path = os.path.join(index_path, "cache.pkl")
+    if os.path.exists(cache_path):
+        try:
+            with open(cache_path, "rb") as f:
+                cache = pickle.load(f)
+            print(f"Loaded local embedding cache with {len(cache)} entries")
+            return cache
+        except Exception as e:
+            print(f"Error loading local cache: {e}")
+
+    # If all else fails, return an empty cache
+    return {}
+
 def build_index(repo_path, api_key, incremental=False):
     openai.api_key = api_key
 
@@ -378,11 +423,23 @@ def build_index(repo_path, api_key, incremental=False):
             print(f"Found previous index at {previous_index_path} that we can reuse")
             existing_index_exists = True
 
+    # Check for shared cache
+    shared_cache_path = get_shared_cache_path(repo_path)
+    shared_cache = {}
+    if os.path.exists(shared_cache_path):
+        try:
+            with open(shared_cache_path, "rb") as f:
+                shared_cache = pickle.load(f)
+            print(f"Loaded shared embedding cache with {len(shared_cache)} entries")
+        except Exception as e:
+            print(f"Error loading shared cache: {e}")
+            shared_cache = {}
+
+    # Determine which path to use for loading existing data
+    load_path = previous_index_path if previous_index_path and incremental else index_path
+
     if incremental and existing_index_exists:
         print(f"Performing incremental update of index for {repo_path}...")
-
-        # Determine which path to use for loading existing data
-        load_path = previous_index_path if previous_index_path else index_path
 
         # Load existing cache
         cache_path = os.path.join(load_path, "cache.pkl")
@@ -395,17 +452,6 @@ def build_index(repo_path, api_key, incremental=False):
                 print(f"Error loading cache: {e}")
                 existing_cache = {}
 
-        # Load file metadata (for change detection)
-        metadata_path = os.path.join(load_path, "file_metadata.pkl")
-        if os.path.exists(metadata_path):
-            try:
-                with open(metadata_path, "rb") as f:
-                    existing_file_metadata = pickle.load(f)
-                print(f"Loaded metadata for {len(existing_file_metadata)} files")
-            except Exception as e:
-                print(f"Error loading file metadata: {e}")
-                existing_file_metadata = {}
-
         # Load existing index to get dimensions
         try:
             index = VectorIndex.load(os.path.join(load_path, "index"))
@@ -417,6 +463,21 @@ def build_index(repo_path, api_key, incremental=False):
     else:
         print(f"Building new index for {repo_path}...")
         index = None
+
+    # Load file metadata (for change detection) - do this for both incremental and full indexing
+    metadata_path = os.path.join(load_path, "file_metadata.pkl")
+    if os.path.exists(metadata_path):
+        try:
+            with open(metadata_path, "rb") as f:
+                existing_file_metadata = pickle.load(f)
+            print(f"Loaded metadata for {len(existing_file_metadata)} files")
+        except Exception as e:
+            print(f"Error loading file metadata: {e}")
+            existing_file_metadata = {}
+
+    # Merge existing cache with shared cache
+    # Shared cache takes precedence as it might be more up-to-date
+    combined_cache = {**existing_cache, **shared_cache}
 
     # Collect current file metadata for change detection
     current_file_metadata = {}
@@ -519,6 +580,19 @@ def build_index(repo_path, api_key, incremental=False):
                         'size': size
                     }
 
+        # Check for deleted files (do this for full indexing too)
+        if existing_file_metadata:
+            deleted_files = []
+            for relative_path in existing_file_metadata:
+                full_path = os.path.join(repo_path, relative_path)
+                if not os.path.exists(full_path):
+                    deleted_files.append(relative_path)
+
+            if deleted_files:
+                print(f"Found {len(deleted_files)} deleted files since last indexing")
+                # No need to do anything else for full indexing as we're rebuilding the index from scratch
+                # and only including files that currently exist
+
     print(f"Total code units to index: {len(code_units)}")
 
     # Determine embedding dimensions
@@ -537,22 +611,29 @@ def build_index(repo_path, api_key, incremental=False):
             dimensions = 1536  # Default to 1536 for text-embedding-3-large
             print(f"Defaulting to {dimensions} dimensions")
 
-    # Initialize embedder with existing cache if available
-    embedder = CodeEmbedder(cache=existing_cache, dimensions=dimensions)
+    # Initialize embedder with combined cache
+    embedder = CodeEmbedder(cache=combined_cache, dimensions=dimensions)
     embeddings = embedder.embed_code_units(code_units)
 
     print("Building index...")
     index = VectorIndex(dimensions=dimensions)
     index.build_index(embeddings)
 
-    # Save the index and embedder cache
+    # Save the index
     os.makedirs(index_path, exist_ok=True)
     index.save(os.path.join(index_path, "index"))
 
-    # Save the cache
-    cache_path = os.path.join(index_path, "cache.pkl")
-    with open(cache_path, "wb") as f:
-        pickle.dump(embedder.cache, f)
+    # Update and save the shared cache
+    shared_cache.update(embedder.cache)
+    os.makedirs(os.path.dirname(shared_cache_path), exist_ok=True)
+    with open(shared_cache_path, "wb") as f:
+        pickle.dump(shared_cache, f)
+
+    # Save a reference to the shared cache in the index directory
+    cache_ref_path = os.path.join(index_path, "cache_ref.txt")
+    with open(cache_ref_path, "w") as f:
+        f.write(f"Using shared cache at: {shared_cache_path}\n")
+        f.write(f"Cache entries: {len(shared_cache)}\n")
 
     # Save the file metadata for future incremental updates
     metadata_path = os.path.join(index_path, "file_metadata.pkl")
@@ -715,9 +796,7 @@ def search(query, top_k, api_key, index_name=None):
     # Load the index and cache
     try:
         index = VectorIndex.load(os.path.join(index_path, "index"))
-        cache_path = os.path.join(index_path, "cache.pkl")
-        with open(cache_path, "rb") as f:
-            cache = pickle.load(f)
+        cache = load_cache(index_path)
     except FileNotFoundError:
         print(f"Index '{index_name}' not found. Please build the index first.")
         return
@@ -772,9 +851,7 @@ def interactive_search(api_key):
     # Load the index and cache
     try:
         index = VectorIndex.load(os.path.join(index_path, "index"))
-        cache_path = os.path.join(index_path, "cache.pkl")
-        with open(cache_path, "rb") as f:
-            cache = pickle.load(f)
+        cache = load_cache(index_path)
     except FileNotFoundError:
         print(f"Index '{index_name}' not found. Please build the index first.")
         return
