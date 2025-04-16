@@ -810,6 +810,7 @@ def search(query, top_k, api_key, index_name=None):
 
     results = engine.search(query, top_k)
     display_results(results)
+    return results
 
 def interactive_search(api_key):
     openai.api_key = api_key
