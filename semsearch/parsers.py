@@ -137,7 +137,11 @@ class UnifiedParser:
             'skipped_folders': set(),  # Store actual folder names
             'parsing_time': 0,
             'parsing_errors': 0,
-            'parsing_errors_details': {}  # Store error types and counts
+            'parsing_errors_details': {},  # Store error types and counts
+            'code_unit_sizes': {
+                'total': 0,
+                'by_type': {}
+            }  # Track sizes of code units
         }
 
     def _load_gitignore(self, repo_path: str) -> pathspec.PathSpec:
@@ -194,7 +198,11 @@ class UnifiedParser:
             'skipped_folders': set(),  # Store actual folder names
             'parsing_time': 0,
             'parsing_errors': 0,
-            'parsing_errors_details': {}  # Store error types and counts
+            'parsing_errors_details': {},  # Store error types and counts
+            'code_unit_sizes': {
+                'total': 0,
+                'by_type': {}
+            }  # Track sizes of code units
         }
 
         # Start timing
@@ -274,6 +282,22 @@ class UnifiedParser:
         # End timing
         end_time = time.time()
         self.stats['parsing_time'] = end_time - start_time
+
+        # Track code unit sizes
+        for unit in code_units:
+            unit_size = len(unit.content)
+            self.stats['code_unit_sizes']['total'] += unit_size
+
+            # Track by type
+            unit_type = unit.unit_type
+            if unit_type in self.stats['code_unit_sizes']['by_type']:
+                self.stats['code_unit_sizes']['by_type'][unit_type]['count'] += 1
+                self.stats['code_unit_sizes']['by_type'][unit_type]['size'] += unit_size
+            else:
+                self.stats['code_unit_sizes']['by_type'][unit_type] = {
+                    'count': 1,
+                    'size': unit_size
+                }
 
         return code_units
 

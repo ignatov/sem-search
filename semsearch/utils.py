@@ -24,7 +24,7 @@ from semsearch.search import (
 def build_index(repo_path, api_key, incremental=False, dry_run=False):
     """
     Build a search index for a repository.
-    
+
     Args:
         repo_path: Path to the repository
         api_key: OpenAI API key
@@ -259,6 +259,20 @@ def build_index(repo_path, api_key, incremental=False, dry_run=False):
         print("\nCode unit types:")
         for unit_type, count in unit_types.items():
             print(f"  {unit_type}: {count}")
+
+        # Print code unit size statistics
+        code_unit_sizes = unified_parser.stats['code_unit_sizes']
+        total_size = code_unit_sizes['total']
+        print(f"\nCode unit size statistics:")
+        print(f"  Total size of all code units: {total_size:,} characters")
+
+        if code_unit_sizes['by_type']:
+            print("\nSize by unit type:")
+            for unit_type, data in code_unit_sizes['by_type'].items():
+                count = data['count']
+                size = data['size']
+                avg_size = size / count if count > 0 else 0
+                print(f"  {unit_type}: {size:,} characters total, {avg_size:.2f} average per unit")
 
         # Print parsing statistics
         stats = unified_parser.stats

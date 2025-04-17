@@ -92,6 +92,13 @@ class TestUnifiedParser(unittest.TestCase):
         self.java_file_path = os.path.join(self.repo_path, "path/to/file.java")
         self.py_file_path = os.path.join(self.repo_path, "path/to/file.py")
 
+        # Make sure the code_unit_sizes field is initialized
+        if 'code_unit_sizes' not in self.parser.stats:
+            self.parser.stats['code_unit_sizes'] = {
+                'total': 0,
+                'by_type': {}
+            }
+
     @patch.object(UnifiedParser, "parse_java_file")
     @patch.object(TreeSitterParser, "parse_file")
     @patch.object(GenericFileParser, "parse_file")
@@ -107,9 +114,23 @@ class TestUnifiedParser(unittest.TestCase):
             (os.path.join(self.repo_path, "path"), ["to"], []),
             (os.path.join(self.repo_path, "path/to"), [], ["file.java", "file.py", "file.txt", "image.png", "compiled.beam", "library.jar"])
         ]
-        mock_java_parse.return_value = [MagicMock()]
-        mock_tree_sitter_parse.return_value = [MagicMock()]
-        mock_generic_parse.return_value = [MagicMock()]
+
+        # Create mock code units with content to test size tracking
+        java_unit = MagicMock()
+        java_unit.content = "public class Test {}"
+        java_unit.unit_type = "class"
+
+        py_unit = MagicMock()
+        py_unit.content = "def test(): pass"
+        py_unit.unit_type = "function"
+
+        txt_unit = MagicMock()
+        txt_unit.content = "This is a text file"
+        txt_unit.unit_type = "file"
+
+        mock_java_parse.return_value = [java_unit]
+        mock_tree_sitter_parse.return_value = [py_unit]
+        mock_generic_parse.return_value = [txt_unit]
 
         # Configure the tree-sitter parser to have python language available
         self.parser.tree_sitter_parser.languages = {'python': MagicMock()}
@@ -136,6 +157,28 @@ class TestUnifiedParser(unittest.TestCase):
 
         # Check that .git directory was skipped
         self.assertEqual(self.parser.stats['skipped_folders_git'], 1)
+
+        # Check that code unit sizes are tracked correctly
+        self.assertIn('code_unit_sizes', self.parser.stats)
+        self.assertIn('total', self.parser.stats['code_unit_sizes'])
+        self.assertIn('by_type', self.parser.stats['code_unit_sizes'])
+
+        # Calculate expected total size
+        expected_total_size = len("public class Test {}") + len("def test(): pass") + len("This is a text file")
+        self.assertEqual(self.parser.stats['code_unit_sizes']['total'], expected_total_size)
+
+        # Check sizes by type
+        self.assertIn('class', self.parser.stats['code_unit_sizes']['by_type'])
+        self.assertEqual(self.parser.stats['code_unit_sizes']['by_type']['class']['size'], len("public class Test {}"))
+        self.assertEqual(self.parser.stats['code_unit_sizes']['by_type']['class']['count'], 1)
+
+        self.assertIn('function', self.parser.stats['code_unit_sizes']['by_type'])
+        self.assertEqual(self.parser.stats['code_unit_sizes']['by_type']['function']['size'], len("def test(): pass"))
+        self.assertEqual(self.parser.stats['code_unit_sizes']['by_type']['function']['count'], 1)
+
+        self.assertIn('file', self.parser.stats['code_unit_sizes']['by_type'])
+        self.assertEqual(self.parser.stats['code_unit_sizes']['by_type']['file']['size'], len("This is a text file"))
+        self.assertEqual(self.parser.stats['code_unit_sizes']['by_type']['file']['count'], 1)
 
     @patch.object(TreeSitterParser, "parse_file")
     @patch("builtins.open", new_callable=mock_open, read_data="public class Test { public void method() {} }")
