@@ -586,15 +586,69 @@ class TreeSitterParser:
                     class_name_node = node.child_by_field_name('name')
                     if class_name_node:
                         class_name = content[class_name_node.start_byte:class_name_node.end_byte]
-                        class_content = content[node.start_byte:node.end_byte]
 
-                        # Limit content size to avoid token limit issues
-                        if len(class_content) > 8000:  # Roughly 2000 tokens
-                            class_content = class_content[:8000] + "... [content truncated]"
+                        # Extract parent classes (bases)
+                        parent_classes = []
+                        bases_node = node.child_by_field_name('bases')
+                        if bases_node:
+                            for base in bases_node.children:
+                                if base.type not in ['(', ')', ',']:
+                                    base_name = content[base.start_byte:base.end_byte]
+                                    parent_classes.append(base_name)
+
+                        # Create a stub representation of the class
+                        if parent_classes:
+                            class_stub = f"class {class_name}({', '.join(parent_classes)}): ... {{\n"
+                        else:
+                            class_stub = f"class {class_name}: ... {{\n"
+
+                        # Extract fields and methods
+                        fields = []
+                        methods = []
+
+                        # Find the block node (class body)
+                        for child in node.children:
+                            if child.type == 'block':
+                                # Extract fields and methods from the class body
+                                for item in child.children:
+                                    if item.type == 'function_definition':
+                                        # Extract method name and parameters
+                                        method_name_node = item.child_by_field_name('name')
+                                        if method_name_node:
+                                            method_name = content[method_name_node.start_byte:method_name_node.end_byte]
+
+                                            # Extract parameters
+                                            params = []
+                                            parameters_node = item.child_by_field_name('parameters')
+                                            if parameters_node:
+                                                for param in parameters_node.children:
+                                                    if param.type not in ['(', ')', ',']:
+                                                        param_text = content[param.start_byte:param.end_byte]
+                                                        params.append(param_text)
+
+                                            methods.append(f"  {method_name}({', '.join(params)})")
+
+                                    elif item.type == 'expression_statement':
+                                        # This might be a field assignment
+                                        for expr in item.children:
+                                            if expr.type == 'assignment':
+                                                left_node = expr.child_by_field_name('left')
+                                                if left_node and left_node.type == 'identifier':
+                                                    field_name = content[left_node.start_byte:left_node.end_byte]
+                                                    fields.append(f"  {field_name}")
+
+                        # Add fields and methods to the stub
+                        for field in fields:
+                            class_stub += field + "\n"
+
+                        for method in methods:
+                            class_stub += method + "\n"
+
+                        class_stub += "}"
 
                         code_units.append(CodeUnit(
                             path=file_path,
-                            content=class_content,
+                            content=class_stub,
                             unit_type="class",
                             name=class_name,
                             package=package
@@ -650,15 +704,110 @@ class TreeSitterParser:
                     class_name_node = node.child_by_field_name('name')
                     if class_name_node:
                         class_name = content[class_name_node.start_byte:class_name_node.end_byte]
-                        class_content = content[node.start_byte:node.end_byte]
 
-                        # Limit content size to avoid token limit issues
-                        if len(class_content) > 8000:  # Roughly 2000 tokens
-                            class_content = class_content[:8000] + "... [content truncated]"
+                        # Extract superclass
+                        superclass = None
+                        superclass_node = node.child_by_field_name('superclass')
+                        if superclass_node:
+                            superclass = content[superclass_node.start_byte:superclass_node.end_byte]
+
+                        # Extract interfaces
+                        interfaces = []
+                        interfaces_node = node.child_by_field_name('interfaces')
+                        if interfaces_node:
+                            for interface in interfaces_node.children:
+                                if interface.type not in ['implements', ',']:
+                                    interface_name = content[interface.start_byte:interface.end_byte]
+                                    interfaces.append(interface_name)
+
+                        # Create a stub representation of the class
+                        class_stub = f"class {class_name}"
+                        if superclass:
+                            class_stub += f" extends {superclass}"
+                        if interfaces:
+                            class_stub += f" implements {', '.join(interfaces)}"
+                        class_stub += ": ... {\n"
+
+                        # Extract fields and methods
+                        fields = []
+                        methods = []
+
+                        # Find the class_body node
+                        for child in node.children:
+                            if child.type == 'class_body':
+                                # Extract fields and methods from the class body
+                                for item in child.children:
+                                    if item.type == 'method_declaration':
+                                        # Extract method name and parameters
+                                        method_name_node = item.child_by_field_name('name')
+                                        if method_name_node:
+                                            method_name = content[method_name_node.start_byte:method_name_node.end_byte]
+
+                                            # Extract parameters
+                                            params = []
+                                            formal_parameters = item.child_by_field_name('parameters')
+                                            if formal_parameters:
+                                                for param in formal_parameters.children:
+                                                    if param.type == 'formal_parameter':
+                                                        # Get parameter type
+                                                        param_type_node = param.child_by_field_name('type')
+                                                        param_type = ""
+                                                        if param_type_node:
+                                                            param_type = content[param_type_node.start_byte:param_type_node.end_byte]
+
+                                                        # Get parameter name
+                                                        param_name_node = param.child_by_field_name('name')
+                                                        param_name = ""
+                                                        if param_name_node:
+                                                            param_name = content[param_name_node.start_byte:param_name_node.end_byte]
+
+                                                        if param_type and param_name:
+                                                            params.append(f"{param_type} {param_name}")
+                                                        elif param_name:
+                                                            params.append(param_name)
+
+                                            # Get return type
+                                            return_type = ""
+                                            return_type_node = item.child_by_field_name('type')
+                                            if return_type_node:
+                                                return_type = content[return_type_node.start_byte:return_type_node.end_byte]
+
+                                            method_signature = f"  {method_name}({', '.join(params)})"
+                                            if return_type:
+                                                method_signature = f"  {return_type} {method_signature}"
+
+                                            methods.append(method_signature)
+
+                                    elif item.type == 'field_declaration':
+                                        # Extract field type and name
+                                        field_type_node = item.child_by_field_name('type')
+                                        field_type = ""
+                                        if field_type_node:
+                                            field_type = content[field_type_node.start_byte:field_type_node.end_byte]
+
+                                        # Find variable declarator
+                                        for decl in item.children:
+                                            if decl.type == 'variable_declarator':
+                                                field_name_node = decl.child_by_field_name('name')
+                                                if field_name_node:
+                                                    field_name = content[field_name_node.start_byte:field_name_node.end_byte]
+                                                    if field_type:
+                                                        fields.append(f"  {field_type} {field_name}")
+                                                    else:
+                                                        fields.append(f"  {field_name}")
+
+                        # Add fields and methods to the stub
+                        for field in fields:
+                            class_stub += field + "\n"
+
+                        for method in methods:
+                            class_stub += method + "\n"
+
+                        class_stub += "}"
 
                         code_units.append(CodeUnit(
                             path=file_path,
-                            content=class_content,
+                            content=class_stub,
                             unit_type="class",
                             name=class_name,
                             package=package
