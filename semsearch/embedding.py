@@ -7,6 +7,7 @@ This module contains functionality for embedding code units into vectors.
 import re
 import numpy as np
 import openai
+import time
 from typing import List, Dict, Optional
 
 from semsearch.models import CodeUnit
@@ -16,10 +17,12 @@ class CodeEmbedder:
     """
     Embeds code units into vectors using OpenAI's embedding API.
 
-    This class handles batching, caching, and error handling for the embedding process.
+    This class handles batching, caching, token limit management, and error handling for the embedding process.
+    It automatically handles texts that exceed the OpenAI token limit by estimating token count,
+    truncating if necessary, and splitting batches into smaller chunks when needed.
     """
 
-    def __init__(self, model_name="text-embedding-3-large", cache=None, dimensions=1536):
+    def __init__(self, model_name="text-embedding-3-small", cache=None, dimensions=1536):
         """
         Initialize the CodeEmbedder.
 
@@ -42,6 +45,9 @@ class CodeEmbedder:
         Returns:
             Dictionary mapping CodeUnit objects to their embedding vectors
         """
+        start_time = time.time()
+        print(f"Starting embedding process for {len(code_units)} code units...")
+
         embeddings = {}
         units_to_embed = []
         texts_to_embed = []
@@ -63,6 +69,11 @@ class CodeEmbedder:
                 embeddings[unit] = embedding
                 self.cache[unit.get_content_hash()] = embedding
 
+        elapsed_time = time.time() - start_time
+        cached_count = len(code_units) - len(units_to_embed)
+        print(f"Embedding process completed in {elapsed_time:.2f} seconds for {len(code_units)} code units")
+        print(f"Cache hits: {cached_count}, Cache misses: {len(units_to_embed)}")
+
         return embeddings
 
     def embed_query(self, query: str) -> np.ndarray:
@@ -81,7 +92,17 @@ class CodeEmbedder:
         """
         Get embeddings for a list of texts.
 
-        This method handles batching, sanitization, and error recovery.
+        This method handles batching, sanitization, token limit checking, and error recovery.
+        It automatically handles texts that exceed the OpenAI token limit by:
+        1. Estimating token count for each text and truncating if necessary
+        2. Checking total token count for each batch and splitting into smaller chunks if needed
+        3. Applying aggressive sanitization to reduce token count when needed
+        4. Using conservative token estimation (1:3 character-to-token ratio)
+        5. Implementing multiple layers of safeguards to prevent token limit errors:
+           - Individual text token limit checks
+           - Batch token limit checks with a conservative limit (6000 tokens)
+           - Chunk token limit checks with fallback to individual processing
+           - Aggressive text sanitization when needed
 
         Args:
             texts: List of text strings to embed
@@ -89,6 +110,9 @@ class CodeEmbedder:
         Returns:
             List of embedding vectors
         """
+        total_start_time = time.time()
+        print(f"Starting embedding process for {len(texts)} texts...")
+
         # Process in batches to avoid token limits
         batch_size = 100  # Adjust based on your average text length
         all_embeddings = []
@@ -111,6 +135,7 @@ class CodeEmbedder:
 
         for i in range(0, len(texts), batch_size):
             batch_texts = texts[i:i+batch_size]
+            batch_start_time = time.time()
             print(f"Processing batch {i//batch_size + 1}/{(len(texts) + batch_size - 1)//batch_size}...")
             try:
                 # Ensure each text in the batch is a valid string
@@ -143,30 +168,134 @@ class CodeEmbedder:
                             print(f"  Replacing empty item {item_number} with placeholder text")
                             text = "placeholder_text_for_embedding"
 
+                        # Estimate token count and truncate if necessary to avoid token limit issues
+                        estimated_tokens = self._estimate_tokens(text)
+                        # OpenAI's text-embedding models have a limit of 8191 tokens per input
+                        if estimated_tokens > 8000:  # Using 8000 as a safe limit
+                            print(f"  Item {item_number} exceeds token limit ({estimated_tokens} estimated tokens)")
+                            # Truncate text to fit within token limit (8000 tokens ≈ 32000 chars)
+                            max_chars = 32000
+                            if len(text) > max_chars:
+                                text = text[:max_chars]
+                                print(f"  Truncated item {item_number} to {len(text)} chars")
+
+                            # Apply aggressive sanitization to further reduce token count
+                            text = self._sanitize_text(text, aggressive=True)
+                            print(f"  Applied aggressive sanitization to item {item_number}")
+
                         cleaned_batch.append(text)
                     else:
                         cleaned_batch.append("")  # Empty string for None values
 
-                response = openai.embeddings.create(
-                    model=self.model_name,
-                    input=cleaned_batch
-                )
-                batch_embeddings = []
-                for data in response.data:
-                    embedding = np.array(data.embedding)
-                    # Resize embedding to match expected dimensions if needed
-                    if len(embedding) != self.dimensions:
-                        if len(embedding) > self.dimensions:
-                            embedding = embedding[:self.dimensions]  # Truncate
-                        else:
-                            # Pad with zeros
-                            padded = np.zeros(self.dimensions)
-                            padded[:len(embedding)] = embedding
-                            embedding = padded
-                    batch_embeddings.append(embedding)
+                # Check total token count for the batch
+                total_tokens = sum(self._estimate_tokens(text) for text in cleaned_batch)
+                max_batch_tokens = 6000  # More conservative limit (well below the 8192 model limit)
+
+                if total_tokens > max_batch_tokens:
+                    print(f"  Total batch token count ({total_tokens}) exceeds limit ({max_batch_tokens})")
+                    print(f"  Splitting batch into smaller chunks...")
+
+                    # Process in smaller chunks
+                    batch_embeddings = []
+                    # More conservative chunk size calculation with an additional safety factor
+                    chunk_size = max(1, len(cleaned_batch) // ((total_tokens // max_batch_tokens) * 2 + 1))
+
+                    for j in range(0, len(cleaned_batch), chunk_size):
+                        chunk = cleaned_batch[j:j+chunk_size]
+                        print(f"  Processing chunk {j//chunk_size + 1}/{(len(cleaned_batch) + chunk_size - 1)//chunk_size}...")
+
+                        # Additional safeguard: check each item in the chunk
+                        chunk_token_count = sum(self._estimate_tokens(text) for text in chunk)
+                        if chunk_token_count > 8000:  # Still too large
+                            print(f"  Chunk token count ({chunk_token_count}) still exceeds safe limit")
+                            print(f"  Processing items in chunk individually...")
+
+                            # Process each item individually
+                            for item in chunk:
+                                try:
+                                    print(f"    Processing individual item, length: {len(item)}")
+                                    print(f"    Item preview: {item[:100]}..." if item else "    Empty item")
+
+                                    start_time = time.time()
+                                    item_response = openai.embeddings.create(
+                                        model=self.model_name,
+                                        input=[item]
+                                    )
+                                    elapsed_time = time.time() - start_time
+                                    print(f"    Item processed in {elapsed_time:.2f} seconds")
+                                    embedding = np.array(item_response.data[0].embedding)
+                                    # Resize embedding if needed
+                                    if len(embedding) != self.dimensions:
+                                        if len(embedding) > self.dimensions:
+                                            embedding = embedding[:self.dimensions]  # Truncate
+                                        else:
+                                            # Pad with zeros
+                                            padded = np.zeros(self.dimensions)
+                                            padded[:len(embedding)] = embedding
+                                            embedding = padded
+                                    batch_embeddings.append(embedding)
+                                except Exception as item_error:
+                                    print(f"  Error processing individual item: {item_error}")
+                                    # Add a zero vector as placeholder
+                                    batch_embeddings.append(np.zeros(self.dimensions))
+                            continue  # Skip the chunk processing
+
+                        # Process the chunk normally
+                        # print(f"  Sending chunk with {len(chunk)} items, total chars: {sum(len(t) for t in chunk)}")
+                        # print(f"  First item preview: {chunk[0][:100]}..." if chunk else "  Empty chunk")
+
+                        start_time = time.time()
+                        chunk_response = openai.embeddings.create(
+                            model=self.model_name,
+                            input=chunk
+                        )
+                        elapsed_time = time.time() - start_time
+                        # print(f"  Chunk processed in {elapsed_time:.2f} seconds")
+
+                        for data in chunk_response.data:
+                            embedding = np.array(data.embedding)
+                            # Resize embedding to match expected dimensions if needed
+                            if len(embedding) != self.dimensions:
+                                if len(embedding) > self.dimensions:
+                                    embedding = embedding[:self.dimensions]  # Truncate
+                                else:
+                                    # Pad with zeros
+                                    padded = np.zeros(self.dimensions)
+                                    padded[:len(embedding)] = embedding
+                                    embedding = padded
+                            batch_embeddings.append(embedding)
+                else:
+                    # Process the entire batch at once
+                    print(f"  Sending entire batch with {len(cleaned_batch)} items, total chars: {sum(len(t) for t in cleaned_batch)}")
+                    print(f"  First item preview: {cleaned_batch[0][:100]}..." if cleaned_batch else "  Empty batch")
+
+                    start_time = time.time()
+                    response = openai.embeddings.create(
+                        model=self.model_name,
+                        input=cleaned_batch
+                    )
+                    elapsed_time = time.time() - start_time
+                    print(f"  Batch processed in {elapsed_time:.2f} seconds")
+
+                    batch_embeddings = []
+                    for data in response.data:
+                        embedding = np.array(data.embedding)
+                        # Resize embedding to match expected dimensions if needed
+                        if len(embedding) != self.dimensions:
+                            if len(embedding) > self.dimensions:
+                                embedding = embedding[:self.dimensions]  # Truncate
+                            else:
+                                # Pad with zeros
+                                padded = np.zeros(self.dimensions)
+                                padded[:len(embedding)] = embedding
+                                embedding = padded
+                        batch_embeddings.append(embedding)
                 all_embeddings.extend(batch_embeddings)
+                batch_elapsed_time = time.time() - batch_start_time
+                print(f"Batch {i//batch_size + 1} completed in {batch_elapsed_time:.2f} seconds")
             except Exception as e:
-                print(f"Error in batch {i//batch_size + 1}: {e}")
+                batch_elapsed_time = time.time() - batch_start_time
+                print(f"Error in batch {i//batch_size + 1} after {batch_elapsed_time:.2f} seconds: {e}")
 
                 # If it's an input validation error, try with more aggressive sanitization first
                 if "$.input" in str(e):
@@ -190,10 +319,16 @@ class CodeEmbedder:
                                 aggressive_batch.append("")
 
                         # Try the API call with aggressively sanitized batch
+                        print(f"  Retrying with aggressive sanitization: {len(aggressive_batch)} items, total chars: {sum(len(t) for t in aggressive_batch)}")
+                        print(f"  First item preview: {aggressive_batch[0][:100]}..." if aggressive_batch else "  Empty batch")
+
+                        start_time = time.time()
                         response = openai.embeddings.create(
                             model=self.model_name,
                             input=aggressive_batch
                         )
+                        elapsed_time = time.time() - start_time
+                        print(f"  Aggressively sanitized batch processed in {elapsed_time:.2f} seconds")
                         batch_embeddings = []
                         for data in response.data:
                             embedding = np.array(data.embedding)
@@ -262,10 +397,16 @@ class CodeEmbedder:
 
                             try:
                                 # First attempt with current sanitization
+                                print(f"    Processing individual item with sanitization, length: {len(text)}")
+                                print(f"    Sanitized item preview: {text[:100]}..." if text else "    Empty item")
+
+                                start_time = time.time()
                                 response = openai.embeddings.create(
                                     model=self.model_name,
                                     input=[text]
                                 )
+                                elapsed_time = time.time() - start_time
+                                print(f"    Sanitized item processed in {elapsed_time:.2f} seconds")
                                 embedding = np.array(response.data[0].embedding)
                                 # Resize embedding to match expected dimensions if needed
                                 if len(embedding) != self.dimensions:
@@ -292,10 +433,16 @@ class CodeEmbedder:
                                     print(f"  After extreme sanitization: {repr(extreme_text[:50])}...")
 
                                     try:
+                                        print(f"    Retrying with extreme sanitization, length: {len(extreme_text)}")
+                                        print(f"    Extreme sanitized item preview: {extreme_text[:100]}...")
+
+                                        start_time = time.time()
                                         response = openai.embeddings.create(
                                             model=self.model_name,
                                             input=[extreme_text]
                                         )
+                                        elapsed_time = time.time() - start_time
+                                        print(f"    Extremely sanitized item processed in {elapsed_time:.2f} seconds")
                                         embedding = np.array(response.data[0].embedding)
                                         # Resize embedding to match expected dimensions if needed
                                         if len(embedding) != self.dimensions:
@@ -322,7 +469,29 @@ class CodeEmbedder:
                 else:
                     raise
 
+        total_elapsed_time = time.time() - total_start_time
+        print(f"Embedding process completed in {total_elapsed_time:.2f} seconds for {len(texts)} texts")
         return all_embeddings
+
+    def _estimate_tokens(self, text: str) -> int:
+        """
+        Estimate the number of tokens in a text.
+
+        This is a conservative estimation based on the rule of thumb that 1 token is approximately 
+        3 characters for English text in OpenAI models. We use a more conservative ratio (3 instead of 4)
+        to ensure we don't exceed token limits.
+
+        Args:
+            text: The text to estimate tokens for
+
+        Returns:
+            Estimated token count
+        """
+        if not text:
+            return 0
+
+        # Conservative estimation: 1 token ≈ 3 characters (more conservative than the typical 4)
+        return len(text) // 3 + 2  # Add 2 to provide a larger safety margin
 
     def _sanitize_text(self, text, aggressive=False):
         """

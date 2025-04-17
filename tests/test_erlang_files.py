@@ -16,10 +16,11 @@ If no API key is provided, the tests that require real embeddings will be skippe
 import unittest
 from unittest.mock import patch, MagicMock
 import os
+import tempfile
 import numpy as np
 from dotenv import load_dotenv
 from semsearch.models import CodeUnit
-from semsearch.parsers import GenericFileParser
+from semsearch.parsers import GenericFileParser, UnifiedParser
 from semsearch.indexing import VectorIndex
 from semsearch.embedding import CodeEmbedder
 
@@ -31,7 +32,8 @@ class TestErlangFiles(unittest.TestCase):
         self.test_data_dir = os.path.join(os.path.dirname(__file__), 'test_data')
         self.documentation_dir = os.path.join(self.test_data_dir, 'documentation')
         self.bif_dir = os.path.join(self.test_data_dir, 'bif')
-        self.parser = GenericFileParser()
+        self.parser = UnifiedParser()  # Use UnifiedParser which now supports tree-sitter
+        self.generic_parser = GenericFileParser()  # Keep GenericFileParser for backward compatibility
         self.embedder = CodeEmbedder(dimensions=384)  # Adjust dimensions based on your embedding model
         self.index = VectorIndex(dimensions=384)  # Adjust dimensions based on your embedding model
 
@@ -42,14 +44,18 @@ class TestErlangFiles(unittest.TestCase):
         # Ensure the file exists
         self.assertTrue(os.path.exists(doc_file_path), f"Test file not found: {doc_file_path}")
 
-        # Parse the file
-        code_units = self.parser.parse_file(doc_file_path, self.test_data_dir)
+        # Parse the file using UnifiedParser
+        code_units = self.parser.parse_java_file(doc_file_path, self.test_data_dir)
 
         # Check that we got at least one code unit
         self.assertGreater(len(code_units), 0, "No code units parsed from documentation file")
 
         # Check that the code unit has the correct properties
-        doc_unit = code_units[0]
+        # Find the file unit (there might be class and method units as well now)
+        file_units = [unit for unit in code_units if unit.unit_type == "file"]
+        self.assertGreater(len(file_units), 0, "No file unit found in parsed code units")
+
+        doc_unit = file_units[0]
         self.assertEqual(doc_unit.path, os.path.relpath(doc_file_path, self.test_data_dir))
         self.assertEqual(doc_unit.unit_type, "file")
         self.assertEqual(doc_unit.name, "ErlangDocumentationProviderTest.java")
@@ -58,6 +64,14 @@ class TestErlangFiles(unittest.TestCase):
         self.assertIn("ErlangDocumentationProviderTest", doc_unit.content)
         self.assertIn("testGenerateDocSdkBif", doc_unit.content)
 
+        # If tree-sitter is available, we should also have class and method units
+        if 'java' in getattr(self.parser, 'tree_sitter_parser', {}).languages:
+            class_units = [unit for unit in code_units if unit.unit_type == "class"]
+            self.assertGreater(len(class_units), 0, "No class units found with tree-sitter parser")
+
+            method_units = [unit for unit in code_units if unit.unit_type == "method"]
+            self.assertGreater(len(method_units), 0, "No method units found with tree-sitter parser")
+
     def test_parse_erlang_bif_file(self):
         """Test parsing the Erlang BIF file."""
         bif_file_path = os.path.join(self.bif_dir, 'ErlangBifParser.java')
@@ -65,14 +79,18 @@ class TestErlangFiles(unittest.TestCase):
         # Ensure the file exists
         self.assertTrue(os.path.exists(bif_file_path), f"Test file not found: {bif_file_path}")
 
-        # Parse the file
-        code_units = self.parser.parse_file(bif_file_path, self.test_data_dir)
+        # Parse the file using UnifiedParser
+        code_units = self.parser.parse_java_file(bif_file_path, self.test_data_dir)
 
         # Check that we got at least one code unit
         self.assertGreater(len(code_units), 0, "No code units parsed from BIF file")
 
         # Check that the code unit has the correct properties
-        bif_unit = code_units[0]
+        # Find the file unit (there might be class and method units as well now)
+        file_units = [unit for unit in code_units if unit.unit_type == "file"]
+        self.assertGreater(len(file_units), 0, "No file unit found in parsed code units")
+
+        bif_unit = file_units[0]
         self.assertEqual(bif_unit.path, os.path.relpath(bif_file_path, self.test_data_dir))
         self.assertEqual(bif_unit.unit_type, "file")
         self.assertEqual(bif_unit.name, "ErlangBifParser.java")
@@ -80,6 +98,14 @@ class TestErlangFiles(unittest.TestCase):
         # Check that the content contains expected text
         self.assertIn("ErlangBifParser", bif_unit.content)
         self.assertIn("BIF_DECLARATION", bif_unit.content)
+
+        # If tree-sitter is available, we should also have class and method units
+        if 'java' in getattr(self.parser, 'tree_sitter_parser', {}).languages:
+            class_units = [unit for unit in code_units if unit.unit_type == "class"]
+            self.assertGreater(len(class_units), 0, "No class units found with tree-sitter parser")
+
+            method_units = [unit for unit in code_units if unit.unit_type == "method"]
+            self.assertGreater(len(method_units), 0, "No method units found with tree-sitter parser")
 
     @patch.object(CodeEmbedder, 'embed_code_units')
     @patch.object(CodeEmbedder, 'embed_query')
@@ -89,10 +115,14 @@ class TestErlangFiles(unittest.TestCase):
         doc_file_path = os.path.join(self.documentation_dir, 'ErlangDocumentationProviderTest.java')
         bif_file_path = os.path.join(self.bif_dir, 'ErlangBifParser.java')
 
-        doc_units = self.parser.parse_file(doc_file_path, self.test_data_dir)
-        bif_units = self.parser.parse_file(bif_file_path, self.test_data_dir)
+        doc_units = self.parser.parse_java_file(doc_file_path, self.test_data_dir)
+        bif_units = self.parser.parse_java_file(bif_file_path, self.test_data_dir)
 
-        all_units = doc_units + bif_units
+        # Filter to only include file units for consistency with previous tests
+        doc_file_units = [unit for unit in doc_units if unit.unit_type == "file"]
+        bif_file_units = [unit for unit in bif_units if unit.unit_type == "file"]
+
+        all_units = doc_file_units + bif_file_units
 
         # Set up mock embeddings
         # Create mock embeddings that will make the documentation file more relevant for a documentation query
@@ -135,10 +165,14 @@ class TestErlangFiles(unittest.TestCase):
         doc_file_path = os.path.join(self.documentation_dir, 'ErlangDocumentationProviderTest.java')
         bif_file_path = os.path.join(self.bif_dir, 'ErlangBifParser.java')
 
-        doc_units = self.parser.parse_file(doc_file_path, self.test_data_dir)
-        bif_units = self.parser.parse_file(bif_file_path, self.test_data_dir)
+        doc_units = self.parser.parse_java_file(doc_file_path, self.test_data_dir)
+        bif_units = self.parser.parse_java_file(bif_file_path, self.test_data_dir)
 
-        all_units = doc_units + bif_units
+        # Filter to only include file units for consistency with previous tests
+        doc_file_units = [unit for unit in doc_units if unit.unit_type == "file"]
+        bif_file_units = [unit for unit in bif_units if unit.unit_type == "file"]
+
+        all_units = doc_file_units + bif_file_units
 
         # Set up mock embeddings
         # Create mock embeddings that will make the BIF file more relevant for a BIF query
@@ -192,10 +226,14 @@ class TestErlangFiles(unittest.TestCase):
         doc_file_path = os.path.join(self.documentation_dir, 'ErlangDocumentationProviderTest.java')
         bif_file_path = os.path.join(self.bif_dir, 'ErlangBifParser.java')
 
-        doc_units = self.parser.parse_file(doc_file_path, self.test_data_dir)
-        bif_units = self.parser.parse_file(bif_file_path, self.test_data_dir)
+        doc_units = self.parser.parse_java_file(doc_file_path, self.test_data_dir)
+        bif_units = self.parser.parse_java_file(bif_file_path, self.test_data_dir)
 
-        all_units = doc_units + bif_units
+        # Filter to only include file units for consistency with previous tests
+        doc_file_units = [unit for unit in doc_units if unit.unit_type == "file"]
+        bif_file_units = [unit for unit in bif_units if unit.unit_type == "file"]
+
+        all_units = doc_file_units + bif_file_units
 
         # Get real embeddings for the code units (not mocked)
         # The dimensions depend on the model being used, so we'll get the dimensions from the first embedding
@@ -256,6 +294,77 @@ class TestErlangFiles(unittest.TestCase):
 
         self.assertGreater(bif_file_score, doc_file_score_in_bif_results, 
                           "BIF file should be ranked higher for BIF query")
+
+
+    def test_tree_sitter_parser(self):
+        """Test the TreeSitterParser with different languages."""
+        # Skip test if tree-sitter is not available
+        if not hasattr(self.parser, 'tree_sitter_parser') or not self.parser.tree_sitter_parser.languages:
+            self.skipTest("Tree-sitter is not available or no languages are loaded.")
+
+        # Test parsing Java files with tree-sitter
+        if 'java' in self.parser.tree_sitter_parser.languages:
+            doc_file_path = os.path.join(self.documentation_dir, 'ErlangDocumentationProviderTest.java')
+
+            # Parse the file directly with tree-sitter parser
+            code_units = self.parser.tree_sitter_parser.parse_file(doc_file_path, self.test_data_dir)
+
+            # Check that we got at least one code unit
+            self.assertGreater(len(code_units), 0, "No code units parsed from Java file with tree-sitter")
+
+            # Check that we have different types of units (file, class, method)
+            unit_types = set(unit.unit_type for unit in code_units)
+            self.assertIn("file", unit_types, "No file unit found in tree-sitter parsed units")
+            self.assertIn("class", unit_types, "No class unit found in tree-sitter parsed units")
+            self.assertIn("method", unit_types, "No method unit found in tree-sitter parsed units")
+
+            print(f"Successfully parsed Java file with tree-sitter, found unit types: {unit_types}")
+
+        # Print information about loaded languages
+        print(f"Loaded languages: {list(self.parser.tree_sitter_parser.languages.keys())}")
+        print(f"Loaded parsers: {list(self.parser.tree_sitter_parser.parsers.keys())}")
+
+        # Test parsing Erlang files with tree-sitter
+        if 'erlang' in self.parser.tree_sitter_parser.languages:
+            print("Erlang language is available in tree-sitter")
+            # Create a simple Erlang file for testing
+            with tempfile.NamedTemporaryFile(suffix='.erl', mode='w', delete=False) as f:
+                f.write("""
+-module(hello).
+-export([hello_world/0]).
+
+hello_world() ->
+    io:format("Hello, World!~n").
+                """)
+                erlang_file_path = f.name
+                print(f"Created temporary Erlang file: {erlang_file_path}")
+                print(f"File content:\n{open(erlang_file_path).read()}")
+
+            try:
+                # Parse the file directly with tree-sitter parser
+                code_units = self.parser.tree_sitter_parser.parse_file(erlang_file_path, os.path.dirname(erlang_file_path))
+
+                # Check that we got at least one code unit
+                self.assertGreater(len(code_units), 0, "No code units parsed from Erlang file with tree-sitter")
+
+                # Check that we have different types of units (file, function)
+                unit_types = set(unit.unit_type for unit in code_units)
+                self.assertIn("file", unit_types, "No file unit found in tree-sitter parsed units")
+                self.assertIn("function", unit_types, "No function unit found in tree-sitter parsed units")
+
+                print(f"Successfully parsed Erlang file with tree-sitter, found unit types: {unit_types}")
+
+                # Check that the function was correctly parsed
+                function_units = [unit for unit in code_units if unit.unit_type == "function"]
+                self.assertGreater(len(function_units), 0, "No function units found in Erlang file")
+
+                # Check that the function has the correct name
+                hello_world_functions = [unit for unit in function_units if unit.name == "hello_world"]
+                self.assertGreater(len(hello_world_functions), 0, "hello_world function not found in Erlang file")
+
+            finally:
+                # Clean up the temporary file
+                os.unlink(erlang_file_path)
 
 
 if __name__ == "__main__":
