@@ -17,7 +17,7 @@ from tests.test_models import TestCodeUnit
 from tests.test_embedding import TestCodeEmbedder
 from tests.test_indexing import TestVectorIndex
 from tests.test_search import TestSearchEngine
-from tests.test_parsers import TestGenericFileParser, TestUnifiedParser, TestJavaParser
+from tests.test_parsers import TestGenericFileParser, TestUnifiedParser
 from tests.test_erlang_files import TestErlangFiles
 from tests.test_functional import TestFunctionalWorkflow
 
@@ -34,7 +34,6 @@ def run_tests():
     test_suite.addTest(unittest.makeSuite(TestSearchEngine))
     test_suite.addTest(unittest.makeSuite(TestGenericFileParser))
     test_suite.addTest(unittest.makeSuite(TestUnifiedParser))
-    test_suite.addTest(unittest.makeSuite(TestJavaParser))
     test_suite.addTest(unittest.makeSuite(TestErlangFiles))
     test_suite.addTest(unittest.makeSuite(TestFunctionalWorkflow))
 

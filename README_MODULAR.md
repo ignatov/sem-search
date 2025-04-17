@@ -7,7 +7,7 @@ This is a modular version of the semantic search system. The code has been reorg
 The code is now organized into the following modules:
 
 - `semsearch/models.py`: Contains the `CodeUnit` class, which represents a unit of code for semantic search.
-- `semsearch/parsers.py`: Contains the parsing classes (`JavaParser`, `GenericFileParser`, `UnifiedParser`) for extracting code units from files.
+- `semsearch/parsers.py`: Contains the parsing classes (`GenericFileParser`, `UnifiedParser`, `TreeSitterParser`) for extracting code units from files.
 - `semsearch/embedding.py`: Contains the `CodeEmbedder` class for embedding code units into vectors.
 - `semsearch/indexing.py`: Contains the `VectorIndex` class for indexing and searching vectors.
 - `semsearch/search.py`: Contains the `SearchEngine` class and search-related functions.

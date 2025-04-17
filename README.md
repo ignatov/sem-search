@@ -78,13 +78,13 @@ python semantic_search.py
 ## How it works
 
 1. **Parsing**: 
-   - For Java files: The tool extracts code units (classes and methods) using the `javalang` parser.
+   - For Java files: The tool extracts code units (classes and methods) using the `tree-sitter` parser.
    - For non-Java files: The tool includes the entire file content and uses the directory structure as package information.
    - The tool only processes files with extensions in the whitelist (covering the top 50 programming languages).
    - Files and directories matching patterns in .gitignore are skipped.
    - The .git directory is always ignored.
    - Multiple encodings (utf-8, latin-1, cp1252, iso-8859-1) are tried when reading files to handle different character encodings.
-   - For Java files that can't be parsed, a fallback mechanism creates a code unit for the entire file to ensure the content is still indexed.
+   - For files that can't be parsed, a fallback mechanism creates a code unit for the entire file to ensure the content is still indexed.
    - Detailed statistics are collected and reported, including parsing time, number of files processed, files/folders skipped, and parsing errors encountered.
 
 2. **Embedding**: Each code unit is converted into a vector embedding using OpenAI's text-embedding model.

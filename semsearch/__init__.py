@@ -2,7 +2,7 @@
 
 # Import from the new modules
 from semsearch.models import CodeUnit
-from semsearch.parsers import JavaParser, GenericFileParser, UnifiedParser
+from semsearch.parsers import GenericFileParser, UnifiedParser
 from semsearch.embedding import CodeEmbedder
 from semsearch.indexing import VectorIndex
 from semsearch.search import (
