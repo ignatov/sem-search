@@ -12,10 +12,7 @@ import pathspec
 import tree_sitter_language_pack
 from tree_sitter import Parser
 
-HAS_LANGUAGE_PACK = True
-
 from semsearch.models import CodeUnit
-
 
 class GenericFileParser:
     """Parser for generic (non-Java) files."""
@@ -104,12 +101,12 @@ class UnifiedParser:
     def __init__(self):
         self.generic_parser = GenericFileParser()
         self.tree_sitter_parser = TreeSitterParser()
-        # Process Java, Python, and text files
-        # We'll use tree-sitter for java and python, and generic parser for text files
+        # Process Java, Python, and XML files
+        # We'll use tree-sitter for java, python, and xml
         self.supported_extensions = {
             '.java',
             '.py',
-            '.txt'
+            '.xml'
         }
 
         # Blacklist of file extensions that should not be parsed
@@ -364,9 +361,9 @@ class TreeSitterParser:
         self.parsers = {}  # Store parsers from tree-sitter-language-pack
         self.language_by_extension = {
             # Map file extensions to language names
-            # Only include java, python, and erlang as per the issue description
             '.py': 'python',
             '.java': 'java',
+            '.xml': 'xml',
             # '.erl': 'erlang',
         }
 

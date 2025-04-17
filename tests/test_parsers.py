@@ -112,7 +112,7 @@ class TestUnifiedParser(unittest.TestCase):
         mock_walk.return_value = [
             (self.repo_path, [".git", "path"], []),
             (os.path.join(self.repo_path, "path"), ["to"], []),
-            (os.path.join(self.repo_path, "path/to"), [], ["file.java", "file.py", "file.txt", "image.png", "compiled.beam", "library.jar"])
+            (os.path.join(self.repo_path, "path/to"), [], ["file.java", "file.py", "file.xml", "file.txt", "image.png", "compiled.beam", "library.jar"])
         ]
 
         # Create mock code units with content to test size tracking
@@ -124,36 +124,43 @@ class TestUnifiedParser(unittest.TestCase):
         py_unit.content = "def test(): pass"
         py_unit.unit_type = "function"
 
-        txt_unit = MagicMock()
-        txt_unit.content = "This is a text file"
-        txt_unit.unit_type = "file"
+        xml_unit = MagicMock()
+        xml_unit.content = "<root>XML content</root>"
+        xml_unit.unit_type = "file"
 
         mock_java_parse.return_value = [java_unit]
-        mock_tree_sitter_parse.return_value = [py_unit]
-        mock_generic_parse.return_value = [txt_unit]
+        mock_tree_sitter_parse.side_effect = lambda file_path, repo_path, stats: [py_unit] if file_path.endswith('.py') else [xml_unit]
+        mock_generic_parse.return_value = []
 
-        # Configure the tree-sitter parser to have python language available
-        self.parser.tree_sitter_parser.languages = {'python': MagicMock()}
-        self.parser.tree_sitter_parser.language_by_extension = {'.py': 'python'}
+        # Configure the tree-sitter parser to have python and xml languages available
+        self.parser.tree_sitter_parser.languages = {'python': MagicMock(), 'xml': MagicMock()}
+        self.parser.tree_sitter_parser.language_by_extension = {'.py': 'python', '.xml': 'xml'}
 
         # Call the method
         code_units = self.parser.parse_repository(self.repo_path)
 
         # Check that the parsers were called correctly
         mock_java_parse.assert_called_once_with(self.java_file_path, self.repo_path)
-        mock_tree_sitter_parse.assert_called_once_with(self.py_file_path, self.repo_path, self.parser.stats)
 
-        # The generic parser should be called for file.txt
-        # This is a change from the original behavior, where the generic parser was not called at all
-        # Now we're using the generic parser for all files except java, python, and erlang
-        txt_file_path = os.path.join(self.repo_path, "path/to/file.txt")
-        mock_generic_parse.assert_called_once_with(txt_file_path, self.repo_path, self.parser.stats)
+        # The tree-sitter parser should be called for both Python and XML files
+        py_file_path = os.path.join(self.repo_path, "path/to/file.py")
+        xml_file_path = os.path.join(self.repo_path, "path/to/file.xml")
+
+        # Check that tree_sitter_parse was called twice (once for Python, once for XML)
+        self.assertEqual(mock_tree_sitter_parse.call_count, 2)
+
+        # Check that the calls were made with the correct arguments
+        mock_tree_sitter_parse.assert_any_call(py_file_path, self.repo_path, self.parser.stats)
+        mock_tree_sitter_parse.assert_any_call(xml_file_path, self.repo_path, self.parser.stats)
+
+        # The generic parser should not be called at all since we're not processing text files anymore
+        mock_generic_parse.assert_not_called()
 
         # Check that blacklisted files were skipped
         self.assertEqual(self.parser.stats['skipped_files_blacklisted'], 3)  # png, beam, jar
 
         # Check the result
-        self.assertEqual(len(code_units), 3)  # 1 from Java, 1 from tree-sitter, 1 from generic
+        self.assertEqual(len(code_units), 3)  # 1 from Java, 1 from Python tree-sitter, 1 from XML tree-sitter
 
         # Check that .git directory was skipped
         self.assertEqual(self.parser.stats['skipped_folders_git'], 1)
@@ -164,7 +171,7 @@ class TestUnifiedParser(unittest.TestCase):
         self.assertIn('by_type', self.parser.stats['code_unit_sizes'])
 
         # Calculate expected total size
-        expected_total_size = len("public class Test {}") + len("def test(): pass") + len("This is a text file")
+        expected_total_size = len("public class Test {}") + len("def test(): pass") + len("<root>XML content</root>")
         self.assertEqual(self.parser.stats['code_unit_sizes']['total'], expected_total_size)
 
         # Check sizes by type
@@ -177,7 +184,7 @@ class TestUnifiedParser(unittest.TestCase):
         self.assertEqual(self.parser.stats['code_unit_sizes']['by_type']['function']['count'], 1)
 
         self.assertIn('file', self.parser.stats['code_unit_sizes']['by_type'])
-        self.assertEqual(self.parser.stats['code_unit_sizes']['by_type']['file']['size'], len("This is a text file"))
+        self.assertEqual(self.parser.stats['code_unit_sizes']['by_type']['file']['size'], len("<root>XML content</root>"))
         self.assertEqual(self.parser.stats['code_unit_sizes']['by_type']['file']['count'], 1)
 
     @patch.object(TreeSitterParser, "parse_file")
@@ -240,9 +247,9 @@ class TestTreeSitterParser(unittest.TestCase):
     def test_language_by_extension(self):
         """Test language_by_extension mapping."""
         # Check that the required extensions are mapped to the correct languages
-        # We now only support java, python, and erlang as per the issue description
         self.assertEqual(self.parser.language_by_extension['.py'], 'python')
         self.assertEqual(self.parser.language_by_extension['.java'], 'java')
+        self.assertEqual(self.parser.language_by_extension['.xml'], 'xml')
         # self.assertEqual(self.parser.language_by_extension['.erl'], 'erlang')
 
         # Check that other extensions are not in the dictionary
@@ -250,6 +257,7 @@ class TestTreeSitterParser(unittest.TestCase):
         self.assertNotIn('.ts', self.parser.language_by_extension)
         self.assertNotIn('.c', self.parser.language_by_extension)
         self.assertNotIn('.erl', self.parser.language_by_extension)
+        self.assertNotIn('.txt', self.parser.language_by_extension)
 
     # We no longer support the fallback path for loading languages when tree-sitter-language-pack is not available
     # This test has been removed because it was testing functionality that we're not supporting anymore
@@ -267,8 +275,7 @@ class TestTreeSitterParser(unittest.TestCase):
         mock_language_pack.get_parser.side_effect = lambda lang: mock_parser
 
         # Create a new parser to trigger _load_languages
-        with patch('semsearch.parsers.HAS_LANGUAGE_PACK', True), \
-             patch.object(TreeSitterParser, '_load_languages') as mock_load_languages:
+        with patch.object(TreeSitterParser, '_load_languages') as mock_load_languages:
             # Create a new parser
             parser = TreeSitterParser()
 
