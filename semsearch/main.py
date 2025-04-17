@@ -23,6 +23,7 @@ def main():
     parser.add_argument("--index", action="store_true", help="Build the search index")
     parser.add_argument("--incremental", action="store_true", help="Perform incremental indexing (only index changed files)")
     parser.add_argument("--dry-run", action="store_true", help="Parse files without creating embeddings (dry run)")
+    parser.add_argument("--no-report", action="store_true", help="Skip generating HTML report")
     parser.add_argument("--search", help="Search query")
     parser.add_argument("--repo", type=str, help="Path to the code repository")
     parser.add_argument("--top-k", type=int, default=10, help="Number of results to return")
@@ -44,7 +45,7 @@ def main():
         if not args.repo:
             print("Error: Repository path required for indexing.")
             return
-        build_index(args.repo, args.api_key, incremental=args.incremental, dry_run=args.dry_run)
+        build_index(args.repo, args.api_key, incremental=args.incremental, dry_run=args.dry_run, generate_report=not args.no_report)
     elif args.search:
         search(args.search, args.top_k, args.api_key, args.index_name)
     else:

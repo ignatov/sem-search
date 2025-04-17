@@ -260,24 +260,59 @@ class UnifiedParser:
 
                 file_path = os.path.join(root, file)
 
-                # Choose the appropriate parser based on file extension
-                if ext == '.java':
-                    # Use the parse_java_file method which now tries tree-sitter first
-                    code_units.extend(self.parse_java_file(file_path, repo_path))
-                elif ext in self.tree_sitter_parser.language_by_extension:
-                    # Try to use tree-sitter parser for other supported languages
-                    lang_name = self.tree_sitter_parser.language_by_extension[ext]
-                    if lang_name in self.tree_sitter_parser.languages:
-                        # Use tree-sitter parser for this language
-                        code_units.extend(self.tree_sitter_parser.parse_file(file_path, repo_path, self.stats))
+                try:
+                    # Choose the appropriate parser based on file extension
+                    if ext == '.java':
+                        # Use the parse_java_file method which now tries tree-sitter first
+                        file_code_units = self.parse_java_file(file_path, repo_path)
+                    elif ext in self.tree_sitter_parser.language_by_extension:
+                        # Try to use tree-sitter parser for other supported languages
+                        lang_name = self.tree_sitter_parser.language_by_extension[ext]
+                        if lang_name in self.tree_sitter_parser.languages:
+                            # Use tree-sitter parser for this language
+                            file_code_units = self.tree_sitter_parser.parse_file(file_path, repo_path, self.stats)
+                        else:
+                            # Fall back to generic parser if tree-sitter language is not available
+                            file_code_units = self.generic_parser.parse_file(file_path, repo_path, self.stats)
                     else:
-                        # Fall back to generic parser if tree-sitter language is not available
-                        code_units.extend(self.generic_parser.parse_file(file_path, repo_path, self.stats))
-                else:
-                    # Fall back to generic parser for unsupported languages
-                    code_units.extend(self.generic_parser.parse_file(file_path, repo_path, self.stats))
+                        # Fall back to generic parser for unsupported languages
+                        file_code_units = self.generic_parser.parse_file(file_path, repo_path, self.stats)
 
-                self.stats['parsed_files'] += 1
+                    code_units.extend(file_code_units)
+                    self.stats['parsed_files'] += 1
+
+                    # Store file processing status for reporting
+                    if 'processed_files' not in self.stats:
+                        self.stats['processed_files'] = []
+                    self.stats['processed_files'].append({
+                        'path': file_path,
+                        'relative_path': rel_path,
+                        'extension': ext,
+                        'size': os.path.getsize(file_path),
+                        'code_units': len(file_code_units)
+                    })
+
+                except Exception as e:
+                    print(f"Error processing file {file_path}: {str(e)}")
+
+                    # Track the error in statistics
+                    self.stats['parsing_errors'] += 1
+                    error_type = type(e).__name__
+                    if error_type in self.stats['parsing_errors_details']:
+                        self.stats['parsing_errors_details'][error_type] += 1
+                    else:
+                        self.stats['parsing_errors_details'][error_type] = 1
+
+                    # Store error details for reporting
+                    if 'error_files' not in self.stats:
+                        self.stats['error_files'] = []
+                    self.stats['error_files'].append({
+                        'path': file_path,
+                        'relative_path': rel_path,
+                        'extension': ext,
+                        'error': str(e),
+                        'error_type': error_type
+                    })
 
         # End timing
         end_time = time.time()

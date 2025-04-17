@@ -15,13 +15,14 @@ from semsearch.models import CodeUnit
 from semsearch.parsers import UnifiedParser
 from semsearch.embedding import CodeEmbedder
 from semsearch.indexing import VectorIndex
+from semsearch.report import ReportGenerator
 from semsearch.search import (
     get_repo_base_dir, get_shared_cache_path, get_index_path,
     find_previous_index, load_cache, update_index_list
 )
 
 
-def build_index(repo_path, api_key, incremental=False, dry_run=False):
+def build_index(repo_path, api_key, incremental=False, dry_run=False, generate_report=True):
     """
     Build a search index for a repository.
 
@@ -30,8 +31,14 @@ def build_index(repo_path, api_key, incremental=False, dry_run=False):
         api_key: OpenAI API key
         incremental: Whether to perform incremental indexing
         dry_run: Whether to only parse files without creating embeddings
+        generate_report: Whether to generate an HTML report
     """
     openai.api_key = api_key
+
+    # Initialize report generator if requested
+    report_generator = None
+    if generate_report:
+        report_generator = ReportGenerator(repo_path)
 
     # Get the index path for this specific repository
     index_path = get_index_path(repo_path)
@@ -112,6 +119,10 @@ def build_index(repo_path, api_key, incremental=False, dry_run=False):
     print(f"Parsing files in {repo_path}...")
     unified_parser = UnifiedParser()
 
+    # Start timing parsing operation
+    if report_generator:
+        report_generator.start_timing("parsing", "repository")
+
     # If incremental, we'll collect code units differently
     if incremental and existing_index_exists and index is not None:
         # Get all files in the repository
@@ -163,11 +174,23 @@ def build_index(repo_path, api_key, incremental=False, dry_run=False):
             dir_path = os.path.dirname(relative_path)
             package_name = dir_path.replace(os.path.sep, '.') if dir_path else None
 
-            # Choose the appropriate parser based on file extension
-            if file_path.endswith('.java'):
-                new_code_units.extend(unified_parser.parse_java_file(file_path, repo_path))
-            else:
-                new_code_units.extend(unified_parser.generic_parser.parse_file(file_path, repo_path, unified_parser.stats))
+            # Record file processing in report
+            if report_generator:
+                report_generator.record_file_processing(file_path, "processed", {})
+
+            try:
+                # Choose the appropriate parser based on file extension
+                if file_path.endswith('.java'):
+                    file_code_units = unified_parser.parse_java_file(file_path, repo_path)
+                else:
+                    file_code_units = unified_parser.generic_parser.parse_file(file_path, repo_path, unified_parser.stats)
+
+                new_code_units.extend(file_code_units)
+            except Exception as e:
+                print(f"Error processing file {file_path}: {str(e)}")
+                # Record error in report
+                if report_generator:
+                    report_generator.record_file_processing(file_path, "error", {"error": str(e)})
 
         print(f"Extracted {len(new_code_units)} code units from changed files")
 
@@ -223,6 +246,31 @@ def build_index(repo_path, api_key, incremental=False, dry_run=False):
                 # and only including files that currently exist
 
     print(f"Total code units to index: {len(code_units)}")
+
+    # End timing parsing operation
+    if report_generator:
+        report_generator.end_timing("parsing", "repository")
+        # Record parser statistics
+        report_generator.record_parser_stats(unified_parser.stats)
+        # Record code units
+        report_generator.record_code_units(code_units)
+
+        # Record file processing information from parser stats
+        if 'processed_files' in unified_parser.stats:
+            for file_info in unified_parser.stats['processed_files']:
+                report_generator.record_file_processing(
+                    file_info['path'], 
+                    "processed", 
+                    {"code_units": file_info.get('code_units', 0)}
+                )
+
+        if 'error_files' in unified_parser.stats:
+            for file_info in unified_parser.stats['error_files']:
+                report_generator.record_file_processing(
+                    file_info['path'], 
+                    "error", 
+                    {"error": file_info.get('error', "Unknown error")}
+                )
 
     # Print parsing statistics
     stats = unified_parser.stats
@@ -300,6 +348,11 @@ def build_index(repo_path, api_key, incremental=False, dry_run=False):
             if len(stats['skipped_folders']) > 10:
                 print(f"  ... and {len(stats['skipped_folders']) - 10} more")
 
+        # Generate report if requested
+        if report_generator:
+            report_path = report_generator.generate_report()
+            print(f"\nGenerated HTML report: {report_path}")
+
         return
 
     # Determine embedding dimensions
@@ -319,12 +372,22 @@ def build_index(repo_path, api_key, incremental=False, dry_run=False):
             print(f"Defaulting to {dimensions} dimensions")
 
     # Initialize embedder with combined cache
+    if report_generator:
+        report_generator.start_timing("embedding", "code_units")
+
     embedder = CodeEmbedder(cache=combined_cache, dimensions=dimensions)
     embeddings = embedder.embed_code_units(code_units)
+
+    if report_generator:
+        report_generator.end_timing("embedding", "code_units")
+        report_generator.start_timing("indexing", "build_index")
 
     print("Building index...")
     index = VectorIndex(dimensions=dimensions)
     index.build_index(embeddings)
+
+    if report_generator:
+        report_generator.end_timing("indexing", "build_index")
 
     # Save the index
     os.makedirs(index_path, exist_ok=True)
@@ -360,5 +423,10 @@ def build_index(repo_path, api_key, incremental=False, dry_run=False):
 
     # Also save a list of available indexes to .semsearch/indexes.txt
     update_index_list()
+
+    # Generate report if requested
+    if report_generator:
+        report_path = report_generator.generate_report()
+        print(f"\nGenerated HTML report: {report_path}")
 
     print(f"Index built successfully at {index_path}")
