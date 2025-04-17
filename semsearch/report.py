@@ -28,7 +28,7 @@ class ReportGenerator:
         self.repo_path = repo_path
         self.report_dir = os.path.join(repo_path, ".semsearch", "reports")
         os.makedirs(self.report_dir, exist_ok=True)
-        
+
         # Initialize timing data
         self.start_time = time.time()
         self.timings = {
@@ -37,7 +37,7 @@ class ReportGenerator:
             "indexing": {},
             "total": 0
         }
-        
+
         # Initialize file processing data
         self.file_processing = {
             "total_files": 0,
@@ -45,7 +45,7 @@ class ReportGenerator:
             "skipped_files": [],
             "error_files": []
         }
-        
+
         # Initialize code unit data
         self.code_units_data = {
             "total": 0,
@@ -64,7 +64,7 @@ class ReportGenerator:
         """
         if category not in self.timings:
             self.timings[category] = {}
-        
+
         self.timings[category][label] = {
             "start": time.time(),
             "end": None,
@@ -95,21 +95,21 @@ class ReportGenerator:
             details: Additional details about the processing
         """
         relative_path = os.path.relpath(file_path, self.repo_path)
-        
+
         file_info = {
             "path": relative_path,
             "extension": os.path.splitext(file_path)[1],
             "size": os.path.getsize(file_path) if os.path.exists(file_path) else 0,
             "details": details or {}
         }
-        
+
         if status == "processed":
             self.file_processing["processed_files"].append(file_info)
         elif status == "skipped":
             self.file_processing["skipped_files"].append(file_info)
         elif status == "error":
             self.file_processing["error_files"].append(file_info)
-            
+
         self.file_processing["total_files"] += 1
 
     def record_code_units(self, code_units: List[CodeUnit]):
@@ -120,7 +120,7 @@ class ReportGenerator:
             code_units: List of code units
         """
         self.code_units_data["total"] = len(code_units)
-        
+
         # Track by type
         for unit in code_units:
             unit_type = unit.unit_type
@@ -132,11 +132,11 @@ class ReportGenerator:
                     "count": 1,
                     "size": len(unit.content)
                 }
-            
+
             # Track by language (based on file extension)
             extension = os.path.splitext(unit.path)[1]
             language = extension[1:] if extension else "unknown"  # Remove the dot
-            
+
             if language in self.code_units_data["by_language"]:
                 self.code_units_data["by_language"][language]["count"] += 1
                 self.code_units_data["by_language"][language]["size"] += len(unit.content)
@@ -145,17 +145,18 @@ class ReportGenerator:
                     "count": 1,
                     "size": len(unit.content)
                 }
-        
-        # Track largest units (top 10)
+
+        # Track largest units (top 50)
         sorted_units = sorted(code_units, key=lambda u: len(u.content), reverse=True)
-        for unit in sorted_units[:10]:
+        for unit in sorted_units[:50]:
             self.code_units_data["largest_units"].append({
                 "path": unit.path,
                 "name": unit.name,
                 "type": unit.unit_type,
                 "size": len(unit.content),
                 "package": unit.package,
-                "class_name": unit.class_name
+                "class_name": unit.class_name,
+                "content": unit.content
             })
 
     def record_parser_stats(self, stats: Dict):
@@ -176,7 +177,7 @@ class ReportGenerator:
         """
         # End total timing
         self.timings["total"] = time.time() - self.start_time
-        
+
         # Create report data
         report_data = {
             "repository": self.repo_path,
@@ -186,22 +187,27 @@ class ReportGenerator:
             "code_units": self.code_units_data,
             "parser_stats": getattr(self, 'parser_stats', {})
         }
-        
+
         # Generate HTML report using template
         html = self._render_html_report(report_data)
-        
+
         # Save the report
         report_filename = f"report_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.html"
         report_path = os.path.join(self.report_dir, report_filename)
-        
+
         with open(report_path, 'w') as f:
             f.write(html)
-        
+
+        # Also save a copy of the report to a fixed location for easy access
+        latest_report_path = os.path.join(self.report_dir, "latest.html")
+        with open(latest_report_path, 'w') as f:
+            f.write(html)
+
         # Also save the raw data as JSON for potential future use
         json_path = os.path.join(self.report_dir, f"report_data_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.json")
         with open(json_path, 'w') as f:
             json.dump(report_data, f, indent=2, default=str)
-        
+
         return report_path
 
     def _render_html_report(self, data: Dict) -> str:
@@ -294,17 +300,57 @@ class ReportGenerator:
             border-radius: 3px;
             font-size: 0.9em;
         }
+        .expandable-content {
+            display: none;
+            padding: 10px;
+            background-color: #f8f8f8;
+            border-radius: 5px;
+            margin-top: 10px;
+            white-space: pre-wrap;
+            font-family: monospace;
+            font-size: 0.9em;
+            overflow-x: auto;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+        .expand-button {
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            padding: 5px 10px;
+            text-align: center;
+            text-decoration: none;
+            display: inline-block;
+            font-size: 12px;
+            margin: 2px 2px;
+            cursor: pointer;
+            border-radius: 3px;
+        }
     </style>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script>
+        function toggleContent(id) {
+            const content = document.getElementById(id);
+            const button = event.target;
+
+            if (content.style.display === "block") {
+                content.style.display = "none";
+                button.textContent = "Show Code";
+            } else {
+                content.style.display = "block";
+                button.textContent = "Hide Code";
+            }
+        }
+    </script>
 </head>
 <body>
     <h1>Semantic Search Processing Report</h1>
-    
+
     <div class="section">
         <h2>Overview</h2>
         <p>Repository: <span class="code">{{ data.repository }}</span></p>
         <p>Generated: {{ data.timestamp }}</p>
-        
+
         <div class="summary">
             <div class="summary-item">
                 <h3>Files</h3>
@@ -313,7 +359,7 @@ class ReportGenerator:
                 <p>Skipped: {{ data.file_processing.skipped_files|length }}</p>
                 <p>Errors: {{ data.file_processing.error_files|length }}</p>
             </div>
-            
+
             <div class="summary-item">
                 <h3>Code Units</h3>
                 <p>Total: {{ data.code_units.total }}</p>
@@ -321,7 +367,7 @@ class ReportGenerator:
                 <p>{{ type }}: {{ info.count }}</p>
                 {% endfor %}
             </div>
-            
+
             <div class="summary-item">
                 <h3>Timing</h3>
                 <p>Total: {{ "%.2f"|format(data.timings.total) }} seconds</p>
@@ -331,14 +377,14 @@ class ReportGenerator:
             </div>
         </div>
     </div>
-    
+
     <div class="section">
         <h2>File Processing</h2>
-        
+
         <div class="chart-container">
             <canvas id="fileTypesChart"></canvas>
         </div>
-        
+
         <h3>Processed Files ({{ data.file_processing.processed_files|length }})</h3>
         {% if data.file_processing.processed_files %}
         <table>
@@ -367,7 +413,7 @@ class ReportGenerator:
         {% else %}
         <p>No files were processed.</p>
         {% endif %}
-        
+
         <h3>Error Files ({{ data.file_processing.error_files|length }})</h3>
         {% if data.file_processing.error_files %}
         <table>
@@ -392,18 +438,18 @@ class ReportGenerator:
         <p>No errors were encountered during file processing.</p>
         {% endif %}
     </div>
-    
+
     <div class="section">
         <h2>Code Units</h2>
-        
+
         <div class="chart-container">
             <canvas id="codeUnitTypesChart"></canvas>
         </div>
-        
+
         <div class="chart-container">
             <canvas id="languageDistributionChart"></canvas>
         </div>
-        
+
         <h3>Code Unit Types</h3>
         <table>
             <thead>
@@ -425,7 +471,7 @@ class ReportGenerator:
                 {% endfor %}
             </tbody>
         </table>
-        
+
         <h3>Largest Code Units</h3>
         {% if data.code_units.largest_units %}
         <table>
@@ -435,6 +481,7 @@ class ReportGenerator:
                     <th>Type</th>
                     <th>Path</th>
                     <th>Size (chars)</th>
+                    <th>Actions</th>
                 </tr>
             </thead>
             <tbody>
@@ -444,6 +491,14 @@ class ReportGenerator:
                     <td>{{ unit.type }}</td>
                     <td>{{ unit.path }}</td>
                     <td>{{ unit.size }}</td>
+                    <td>
+                        <button class="expand-button" onclick="toggleContent('code-unit-{{ loop.index }}')">Show Code</button>
+                    </td>
+                </tr>
+                <tr>
+                    <td colspan="5">
+                        <div id="code-unit-{{ loop.index }}" class="expandable-content">{{ unit.content }}</div>
+                    </td>
                 </tr>
                 {% endfor %}
             </tbody>
@@ -452,10 +507,10 @@ class ReportGenerator:
         <p>No code units were processed.</p>
         {% endif %}
     </div>
-    
+
     <div class="section">
         <h2>Parser Statistics</h2>
-        
+
         {% if data.parser_stats %}
         <table>
             <thead>
@@ -499,7 +554,7 @@ class ReportGenerator:
                 </tr>
             </tbody>
         </table>
-        
+
         {% if data.parser_stats.parsing_errors_details %}
         <h3>Parsing Error Types</h3>
         <table>
@@ -519,12 +574,12 @@ class ReportGenerator:
             </tbody>
         </table>
         {% endif %}
-        
+
         {% else %}
         <p>No parser statistics available.</p>
         {% endif %}
     </div>
-    
+
     <script>
         // File types chart
         const fileExtensions = {};
@@ -532,10 +587,10 @@ class ReportGenerator:
         const ext = "{{ file.extension }}" || "unknown";
         fileExtensions[ext] = (fileExtensions[ext] || 0) + 1;
         {% endfor %}
-        
+
         const fileExtLabels = Object.keys(fileExtensions);
         const fileExtData = Object.values(fileExtensions);
-        
+
         new Chart(document.getElementById('fileTypesChart'), {
             type: 'bar',
             data: {
@@ -558,11 +613,11 @@ class ReportGenerator:
                 }
             }
         });
-        
+
         // Code unit types chart
         const unitTypeLabels = [{% for type in data.code_units.by_type %}"{{ type }}",{% endfor %}];
         const unitTypeCounts = [{% for type, info in data.code_units.by_type.items() %}{{ info.count }},{% endfor %}];
-        
+
         new Chart(document.getElementById('codeUnitTypesChart'), {
             type: 'pie',
             data: {
@@ -594,11 +649,11 @@ class ReportGenerator:
                 maintainAspectRatio: false
             }
         });
-        
+
         // Language distribution chart
         const langLabels = [{% for lang in data.code_units.by_language %}"{{ lang }}",{% endfor %}];
         const langCounts = [{% for lang, info in data.code_units.by_language.items() %}{{ info.count }},{% endfor %}];
-        
+
         new Chart(document.getElementById('languageDistributionChart'), {
             type: 'doughnut',
             data: {
@@ -642,6 +697,6 @@ class ReportGenerator:
 </body>
 </html>
         """
-        
+
         # Render the template with the data
         return Template(template).render(data=data)

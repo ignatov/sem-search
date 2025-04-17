@@ -509,7 +509,8 @@ class TreeSitterParser:
                 code_units.extend(self._extract_code_units(tree, relative_path, content, package, lang_name))
 
                 # If we didn't extract any code units, create a fallback code unit for the entire file
-                if not code_units:
+                # For Java files, we only want to create code units for classes and methods
+                if not code_units and lang_name != 'java':
                     code_units.append(CodeUnit(
                         path=relative_path,
                         content=content,
@@ -519,13 +520,15 @@ class TreeSitterParser:
                     ))
             else:
                 # If we don't have a tree-sitter parser for this language, create a code unit for the entire file
-                code_units.append(CodeUnit(
-                    path=relative_path,
-                    content=content,
-                    unit_type="file",
-                    name=os.path.basename(file_path),
-                    package=package
-                ))
+                # For Java files, we only want to create code units for classes and methods
+                if ext != '.java':
+                    code_units.append(CodeUnit(
+                        path=relative_path,
+                        content=content,
+                        unit_type="file",
+                        name=os.path.basename(file_path),
+                        package=package
+                    ))
 
         except Exception as e:
             error_msg = f"Error parsing file {file_path} with tree-sitter: {str(e)}"
@@ -541,13 +544,15 @@ class TreeSitterParser:
                     stats['parsing_errors_details'][error_type] = 1
 
             # Create a fallback code unit for the entire file
-            code_units.append(CodeUnit(
-                path=relative_path,
-                content=content,
-                unit_type="file",
-                name=os.path.basename(file_path),
-                package=package
-            ))
+            # For Java files, we only want to create code units for classes and methods
+            if ext != '.java':
+                code_units.append(CodeUnit(
+                    path=relative_path,
+                    content=content,
+                    unit_type="file",
+                    name=os.path.basename(file_path),
+                    package=package
+                ))
 
         return code_units
 
@@ -568,14 +573,16 @@ class TreeSitterParser:
         code_units = []
         root_node = tree.root_node
 
-        # Create a code unit for the entire file
-        code_units.append(CodeUnit(
-            path=file_path,
-            content=content,
-            unit_type="file",
-            name=os.path.basename(file_path),
-            package=package
-        ))
+        # Create a code unit for the entire file only for non-Java files
+        # For Java files, we'll only create code units for classes and methods
+        if lang_name != 'java':
+            code_units.append(CodeUnit(
+                path=file_path,
+                content=content,
+                unit_type="file",
+                name=os.path.basename(file_path),
+                package=package
+            ))
 
         # Extract classes and functions based on the language
         if lang_name == 'python':
